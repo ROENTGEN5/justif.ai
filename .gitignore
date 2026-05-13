@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Expo
+.expo/
+dist/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Build outputs
+android/
+ios/
+web-build/
+*.aab
+*.apk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Play Store credentials
+play-store-key.json
+
+# Package lock (keep package-lock.json)
+yarn.lock
+
+# Large data files (exceeds GitHub 100MB limit)
+backend/data/final_clean_laws.csv

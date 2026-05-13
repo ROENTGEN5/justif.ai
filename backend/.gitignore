@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files (not needed at runtime)
+data/final_clean_laws.csv
+
+# Keep these (needed at runtime):
+# data/faiss_index.bin
+# data/chunks_metadata.pkl
