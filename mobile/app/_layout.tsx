@@ -18,17 +18,18 @@ function RootLayoutNav() {
   const { theme } = useTheme();
   const segments = useSegments();
   const router = useRouter();
+  
+  console.log("[RootLayoutNav] isLoading:", isLoading, "session:", !!session, "segments:", segments);
 
   useEffect(() => {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
+    console.log("[RootLayoutNav] Redirect check — inAuthGroup:", inAuthGroup, "session:", !!session);
 
     if (!session && !inAuthGroup) {
-      // Not signed in — redirect to login
       router.replace("/(auth)/login");
     } else if (session && inAuthGroup) {
-      // Signed in but on auth screen — redirect to main
       router.replace("/(main)/chat");
     }
   }, [session, isLoading, segments]);

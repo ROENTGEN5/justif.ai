@@ -3,10 +3,7 @@
  * Uses AsyncStorage for session persistence and SecureStore for tokens.
  */
 
-import "react-native-url-polyfill/auto";
-if (typeof window === 'undefined') {
-  (global as any).window = {};
-}
+
 import { createClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
@@ -18,25 +15,35 @@ const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || "https://your-proje
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "your-anon-key";
 
 // ─── Secure Storage Adapter ────────────────────────────────
-// Uses expo-secure-store on native, AsyncStorage on web
+// Uses AsyncStorage on native, standard localStorage on web
 const SecureStoreAdapter = {
   getItem: async (key: string) => {
     if (Platform.OS === "web") {
-      return AsyncStorage.getItem(key);
+      try { return window.localStorage.getItem(key); } catch (e) { return null; }
     }
-    return SecureStore.getItemAsync(key);
+    try {
+      return await AsyncStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
   },
   setItem: async (key: string, value: string) => {
     if (Platform.OS === "web") {
-      return AsyncStorage.setItem(key, value);
+      try { window.localStorage.setItem(key, value); } catch (e) {}
+      return;
     }
-    return SecureStore.setItemAsync(key, value);
+    try {
+      await AsyncStorage.setItem(key, value);
+    } catch (e) {}
   },
   removeItem: async (key: string) => {
     if (Platform.OS === "web") {
-      return AsyncStorage.removeItem(key);
+      try { window.localStorage.removeItem(key); } catch (e) {}
+      return;
     }
-    return SecureStore.deleteItemAsync(key);
+    try {
+      await AsyncStorage.removeItem(key);
+    } catch (e) {}
   },
 };
 

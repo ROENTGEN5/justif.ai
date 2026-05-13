@@ -5,6 +5,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemePalettes, ThemeMode, ThemeColors } from "../constants/Colors";
 
@@ -22,12 +23,28 @@ const ThemeContext = createContext<ThemeContextValue>({
   setMode: () => {},
 });
 
+// Safe storage wrapper that works on both native and web
+const getThemeStorage = async () => {
+  if (Platform.OS === "web") {
+    try { return window.localStorage.getItem(THEME_STORAGE_KEY); } catch (e) { return null; }
+  }
+  return await AsyncStorage.getItem(THEME_STORAGE_KEY);
+};
+
+const setThemeStorage = async (mode: string) => {
+  if (Platform.OS === "web") {
+    try { window.localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (e) {}
+    return;
+  }
+  await AsyncStorage.setItem(THEME_STORAGE_KEY, mode);
+};
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>("light");
 
   useEffect(() => {
     // Load saved theme on mount
-    AsyncStorage.getItem(THEME_STORAGE_KEY).then((stored) => {
+    getThemeStorage().then((stored) => {
       if (stored && (stored === "light" || stored === "dark" || stored === "night")) {
         setModeState(stored as ThemeMode);
       }
@@ -36,7 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setMode = (newMode: ThemeMode) => {
     setModeState(newMode);
-    AsyncStorage.setItem(THEME_STORAGE_KEY, newMode);
+    setThemeStorage(newMode);
   };
 
   const theme = ThemePalettes[mode];

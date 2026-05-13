@@ -10,16 +10,18 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.justifai.app"
+      "bundleIdentifier": "com.justifai.app.v2"
     },
     "android": {
-      "package": "com.justifai.app",
+      "package": "com.justifai.app.v2",
       "adaptiveIcon": {
         "backgroundColor": "#171717",
         "foregroundImage": "./assets/adaptive-icon.png"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.INTERNET"]
+      "permissions": [
+        "android.permission.INTERNET"
+      ]
     },
     "web": {
       "output": "static",
@@ -36,15 +38,18 @@
           "backgroundColor": "#171717"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "f754c01b-5b19-46ed-9cdf-d477e7714cbe"
       }
-    }
+    },
+    "owner": "roentgen"
   }
 }
