@@ -3,6 +3,7 @@ Chat Routes
 Handles RAG-powered conversations with law retrieval, messaging, and history.
 """
 
+import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.middleware.auth import get_current_user, AuthenticatedUser
@@ -24,6 +25,22 @@ from app.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Chat"])
+
+# UUID validation pattern
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _validate_uuid(value: str, field_name: str = "ID") -> str:
+    """Validate that a string is a proper UUID. Raises 400 if not."""
+    if not _UUID_PATTERN.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {field_name} format.",
+        )
+    return value
 
 
 @router.post("/chat", response_model=ChatMessageResponse)
@@ -98,7 +115,7 @@ async def send_message(
 
             logger.info(
                 f"RAG retrieved {len(search_results)} chunks, "
-                f"{len(sources)} unique sources for query: {request.message[:80]}"
+                f"{len(sources)} unique sources for user={user.user_id}"
             )
         else:
             logger.warning("RAG service not ready. Generating response without legal context.")
@@ -148,10 +165,10 @@ async def send_message(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing message: {e}", exc_info=True)
+        logger.error(f"Error processing message for user={user.user_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process message: {str(e)}",
+            detail="Failed to process message. Please try again.",
         )
 
 
@@ -199,9 +216,10 @@ async def list_chats(
         return ChatListResponse(chats=chats)
 
     except Exception as e:
+        logger.error(f"Failed to fetch chats for user={user.user_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch chats: {str(e)}",
+            detail="Failed to fetch conversations. Please try again.",
         )
 
 
@@ -231,9 +249,10 @@ async def create_chat(
         )
 
     except Exception as e:
+        logger.error(f"Failed to create chat for user={user.user_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create chat: {str(e)}",
+            detail="Failed to create conversation. Please try again.",
         )
 
 
@@ -243,6 +262,8 @@ async def get_chat_messages(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     """Get all messages for a specific chat, ordered chronologically."""
+    _validate_uuid(chat_id, "chat_id")
+
     try:
         client = get_user_client(user.token)
         # Verify chat belongs to user
@@ -284,9 +305,10 @@ async def get_chat_messages(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch messages for chat={chat_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch messages: {str(e)}",
+            detail="Failed to fetch messages. Please try again.",
         )
 
 
@@ -296,6 +318,8 @@ async def delete_chat(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     """Delete a chat and all its messages."""
+    _validate_uuid(chat_id, "chat_id")
+
     try:
         client = get_user_client(user.token)
         # Verify chat belongs to user
@@ -321,7 +345,8 @@ async def delete_chat(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to delete chat={chat_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete chat: {str(e)}",
+            detail="Failed to delete conversation. Please try again.",
         )

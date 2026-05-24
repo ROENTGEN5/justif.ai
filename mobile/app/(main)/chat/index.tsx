@@ -9,7 +9,10 @@ import {
   Text,
   FlatList,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import { useHeaderHeight } from "@react-navigation/elements";
 import { useRouter } from "expo-router";
 import Strings from "../../../constants/Strings";
 import ChatBubble from "../../../components/ChatBubble";
@@ -29,6 +32,7 @@ interface DisplayMessage {
 }
 
 export default function NewChatScreen() {
+  const headerHeight = useHeaderHeight();
   const router = useRouter();
   const { theme } = useTheme();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -215,8 +219,13 @@ export default function NewChatScreen() {
   ), []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
-      {/* Filter bar */}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={headerHeight}
+    >
+      <View style={{ flex: 1, backgroundColor: theme.background }}>
+        {/* Filter bar */}
       {lawTypes.length > 0 && (
         <FilterChips
           lawTypes={lawTypes}
@@ -245,8 +254,8 @@ export default function NewChatScreen() {
         />
       )}
 
-      {/* Input bar */}
-      <ChatInput onSend={handleSend} isLoading={isLoading} />
-    </View>
+        <ChatInput onSend={handleSend} isLoading={isLoading} />
+      </View>
+    </KeyboardAvoidingView>
   );
 }

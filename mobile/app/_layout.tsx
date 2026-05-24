@@ -10,8 +10,12 @@ import { View, ActivityIndicator } from "react-native";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { ThemeProvider, useTheme } from "../lib/theme";
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
   const { session, isLoading } = useAuth();
@@ -32,6 +36,9 @@ function RootLayoutNav() {
     } else if (session && inAuthGroup) {
       router.replace("/(main)/chat");
     }
+    
+    // Hide splash screen once loading is complete and routing is handled
+    SplashScreen.hideAsync();
   }, [session, isLoading, segments]);
 
   // Show loading spinner while checking auth

@@ -28,6 +28,10 @@ export const Strings = {
   hasAccount: "Already have an account?",
   signingIn: "Signing in...",
   registering: "Registering...",
+  googleSignIn: "Sign in with Google",
+  googleSignUp: "Sign up with Google",
+  orContinueWith: "or continue with",
+  googleSignInError: "Google sign-in failed. Please try again.",
 
   // ─── Chat ────────────────────────────────────────────
   chatWelcome:

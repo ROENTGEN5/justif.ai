@@ -64,21 +64,7 @@ def _extract_user(payload: dict, token: str) -> AuthenticatedUser:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthenticatedUser:
-    """
-    FastAPI dependency that verifies the Supabase JWT and extracts user info.
-
-    Supports:
-      - ES256 tokens (verified via Supabase JWKS endpoint)
-      - HS256/HS384 tokens (verified via SUPABASE_JWT_SECRET)
-
-    Usage in route:
-        @router.get("/protected")
-        async def protected_route(user: AuthenticatedUser = Depends(get_current_user)):
-            return {"user_id": user.user_id}
-
-    Raises:
-        HTTPException 401: If token is missing, invalid, or expired.
-    """
+   
     token = credentials.credentials
 
     # Read the token header to determine the algorithm
@@ -116,7 +102,7 @@ async def get_current_user(
                 )
 
             user = _extract_user(payload, token)
-            logger.info(f"Auth OK (JWKS/{alg}): user={user.user_id}")
+            logger.info(f"Auth OK (JWKS/{alg}): user={user.user_id} token=...{token[-8:]}")
             return user
 
         # ── HS256 / symmetric: use JWT secret ────────────────
@@ -146,7 +132,7 @@ async def get_current_user(
                         audience="authenticated",
                     )
                     user = _extract_user(payload, token)
-                    logger.info(f"Auth OK (HMAC): user={user.user_id}")
+                    logger.info(f"Auth OK (HMAC): user={user.user_id} token=...{token[-8:]}")
                     return user
                 except jwt.InvalidAudienceError:
                     # Retry without audience
@@ -158,7 +144,7 @@ async def get_current_user(
                             options={"verify_aud": False},
                         )
                         user = _extract_user(payload, token)
-                        logger.info(f"Auth OK (HMAC/no-aud): user={user.user_id}")
+                        logger.info(f"Auth OK (HMAC/no-aud): user={user.user_id} token=...{token[-8:]}")
                         return user
                     except jwt.InvalidTokenError as e:
                         last_error = e
@@ -176,9 +162,9 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning(f"JWT verification failed: {e}")
+        logger.warning(f"JWT verification failed for token=...{token[-8:]}: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication token: {str(e)}",
+            detail="Invalid authentication token. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )

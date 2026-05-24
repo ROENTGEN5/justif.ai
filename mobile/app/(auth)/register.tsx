@@ -1,6 +1,7 @@
 /**
  * Register Screen
  * Minimalist registration form with gray/black/white aesthetic.
+ * Supports email/password and Google Sign-Up.
  */
 
 import React, { useState } from "react";
@@ -14,6 +15,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { Link, useRouter } from "expo-router";
 import Strings from "../../constants/Strings";
@@ -22,7 +24,7 @@ import { useAuth } from "../../lib/auth";
 import { useTheme } from "../../lib/theme";
 
 export default function RegisterScreen() {
-  const { signUp } = useAuth();
+  const { signUp, signInWithGoogle } = useAuth();
   const { theme } = useTheme();
   const router = useRouter();
   const [fullName, setFullName] = useState("");
@@ -30,6 +32,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleRegister = async () => {
@@ -61,6 +64,17 @@ export default function RegisterScreen() {
       Alert.alert("Error", error.message || Strings.errorRegister);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setIsGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      Alert.alert("Error", error.message || Strings.googleSignInError);
+    } finally {
+      setIsGoogleLoading(false);
     }
   };
 
@@ -279,7 +293,7 @@ export default function RegisterScreen() {
             {/* Register Button */}
             <TouchableOpacity
               onPress={handleRegister}
-              disabled={isLoading}
+              disabled={isLoading || isGoogleLoading}
               activeOpacity={0.8}
               style={{
                 backgroundColor: theme.accent,
@@ -312,6 +326,80 @@ export default function RegisterScreen() {
                 >
                   {Strings.register}
                 </Text>
+              )}
+            </TouchableOpacity>
+
+            {/* ─── Divider ─────────────────────────────── */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginVertical: 20,
+              }}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  height: 1,
+                  backgroundColor: theme.border,
+                }}
+              />
+              <Text
+                style={{
+                  marginHorizontal: 12,
+                  fontSize: 12,
+                  color: theme.textTertiary,
+                  fontWeight: "500",
+                }}
+              >
+                {Strings.orContinueWith}
+              </Text>
+              <View
+                style={{
+                  flex: 1,
+                  height: 1,
+                  backgroundColor: theme.border,
+                }}
+              />
+            </View>
+
+            {/* ─── Google Sign-Up Button ────────────────── */}
+            <TouchableOpacity
+              onPress={handleGoogleSignUp}
+              disabled={isLoading || isGoogleLoading}
+              activeOpacity={0.8}
+              style={{
+                backgroundColor: theme.inputBg,
+                paddingVertical: 14,
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 10,
+                borderWidth: 1,
+                borderColor: theme.inputBorder,
+                opacity: isGoogleLoading ? 0.7 : 1,
+              }}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator size="small" color={theme.textSecondary} />
+              ) : (
+                <>
+                  <Image
+                    source={{ uri: "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" }}
+                    style={{ width: 20, height: 20 }}
+                    resizeMode="contain"
+                  />
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: "600",
+                      color: theme.text,
+                    }}
+                  >
+                    {Strings.googleSignUp}
+                  </Text>
+                </>
               )}
             </TouchableOpacity>
           </View>

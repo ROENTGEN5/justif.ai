@@ -3,9 +3,17 @@ Pydantic Models / Schemas
 Request and response models for the Justif.ai RAG API.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
+import re
+
+
+# UUID pattern for validation
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 # ─── Law Source ──────────────────────────────────────────────
@@ -26,7 +34,7 @@ class ChatMessageRequest(BaseModel):
     """Request body for sending a chat message."""
     chat_id: Optional[str] = Field(
         None,
-        description="Existing chat ID. If None, a new chat is created."
+        description="Existing chat ID (UUID). If None, a new chat is created."
     )
     message: str = Field(
         ...,
@@ -39,6 +47,14 @@ class ChatMessageRequest(BaseModel):
         description="Optional filter: list of law type labels to search within. "
                     "If None, searches all law types."
     )
+
+    @field_validator("chat_id")
+    @classmethod
+    def validate_chat_id(cls, v):
+        """Ensure chat_id is a valid UUID if provided."""
+        if v is not None and not _UUID_PATTERN.match(v):
+            raise ValueError("chat_id must be a valid UUID.")
+        return v
 
 
 class ChatMessageResponse(BaseModel):
@@ -56,7 +72,8 @@ class CreateChatRequest(BaseModel):
     """Request body for creating a new chat session."""
     title: Optional[str] = Field(
         "Bagong Usapan",
-        description="Title for the new chat."
+        max_length=200,
+        description="Title for the new chat (max 200 characters)."
     )
 
 

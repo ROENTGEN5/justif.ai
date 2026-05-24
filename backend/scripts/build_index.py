@@ -72,8 +72,8 @@ def main():
     start_time = time.time()
 
     # Step 1: Load and chunk CSV
-    print("[Step 1/4] Loading and chunking CSV (Limited to 10 laws for quick prototype)...")
-    chunks = load_and_chunk_csv(max_laws=10)
+    print("[Step 1/4] Loading and chunking all 13,953 laws from CSV...")
+    chunks = load_and_chunk_csv()
     print(f"   [OK] Created {len(chunks)} chunks from the CSV")
     print()
 

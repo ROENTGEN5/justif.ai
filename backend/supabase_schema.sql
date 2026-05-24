@@ -112,14 +112,24 @@ create policy "Users can insert messages into own chats"
 
 -- ============================================================
 -- 4. TRIGGER: Auto-create profile on user signup
+--    Supports email/password AND Google OAuth signups
 -- ============================================================
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, full_name)
+  insert into public.profiles (id, full_name, avatar_url)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', '')
+    coalesce(
+      new.raw_user_meta_data->>'full_name',
+      new.raw_user_meta_data->>'name',
+      ''
+    ),
+    coalesce(
+      new.raw_user_meta_data->>'avatar_url',
+      new.raw_user_meta_data->>'picture',
+      null
+    )
   );
   return new;
 end;

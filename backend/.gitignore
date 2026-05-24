@@ -17,9 +17,7 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Large data files (not needed at runtime)
+# Large data files (not needed in Git due to GitHub size limits)
 data/final_clean_laws.csv
-
-# Keep these (needed at runtime):
-# data/faiss_index.bin
-# data/chunks_metadata.pkl
+data/faiss_index.bin
+data/chunks_metadata.pkl

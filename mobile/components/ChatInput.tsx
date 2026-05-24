@@ -10,7 +10,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,11 +42,7 @@ export default function ChatInput({
   const canSend = message.trim().length > 0 && !isLoading && !disabled;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-    >
-      <View
+    <View
         style={{
           flexDirection: "row",
           alignItems: "flex-end",
@@ -124,6 +119,5 @@ export default function ChatInput({
           )}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
   );
 }

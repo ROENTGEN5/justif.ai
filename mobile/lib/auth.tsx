@@ -1,6 +1,7 @@
 /**
  * Authentication Context & Provider
  * Manages Supabase auth state across the app.
+ * Supports email/password and Google Sign-In.
  */
 
 import React, {
@@ -14,6 +15,17 @@ import { Alert } from "react-native";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import Strings from "../constants/Strings";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
+
+// ─── Configure Google Sign-In ───────────────────────────────
+
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
+  offlineAccess: true,
+});
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -32,6 +44,8 @@ interface AuthContextType {
     password: string,
     fullName: string
   ) => Promise<void>;
+  /** Sign in with Google */
+  signInWithGoogle: () => Promise<void>;
   /** Sign out and clear session */
   signOut: () => Promise<void>;
 }
@@ -44,6 +58,7 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   signIn: async () => {},
   signUp: async () => {},
+  signInWithGoogle: async () => {},
   signOut: async () => {},
 });
 
@@ -105,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Sign in
+  // Sign in with email/password
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -117,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Sign up
+  // Sign up with email/password
   const signUp = useCallback(
     async (email: string, password: string, fullName: string) => {
       const { error } = await supabase.auth.signUp({
@@ -137,6 +152,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // Sign in with Google (native)
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      // Check if Google Play Services are available
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Trigger Google Sign-In
+      const signInResult = await GoogleSignin.signIn();
+
+      // Get the ID token from the sign-in result
+      const idToken = signInResult?.data?.idToken;
+
+      if (!idToken) {
+        throw new Error("No ID token received from Google.");
+      }
+
+      // Sign in to Supabase with the Google ID token
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: "google",
+        token: idToken,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    } catch (error: any) {
+      // Handle specific Google Sign-In errors
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User cancelled — silently return
+        return;
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        // Sign-in already in progress
+        return;
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        throw new Error("Google Play Services is not available on this device.");
+      } else {
+        throw error;
+      }
+    }
+  }, []);
+
   // Sign out
   const signOut = useCallback(async () => {
     Alert.alert(Strings.signOut, Strings.signOutConfirm, [
@@ -145,6 +201,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         text: Strings.confirm,
         style: "destructive",
         onPress: async () => {
+          // Also sign out of Google if signed in
+          try {
+            const isSignedIn = GoogleSignin.getCurrentUser();
+            if (isSignedIn) {
+              await GoogleSignin.signOut();
+            }
+          } catch (e) {
+            // Ignore Google sign-out errors
+          }
+
           const { error } = await supabase.auth.signOut();
           if (error) {
             Alert.alert("Error", error.message);
@@ -156,7 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user, isLoading, signIn, signUp, signOut }}
+      value={{ session, user, isLoading, signIn, signUp, signInWithGoogle, signOut }}
     >
       {children}
     </AuthContext.Provider>
