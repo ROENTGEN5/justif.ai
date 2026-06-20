@@ -60,12 +60,17 @@ class ChatMessageRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     """Response body after processing a chat message."""
     chat_id: str = Field(..., description="The chat session ID.")
+    message_id: str = Field(..., description="The ID of the assistant's message in the database.")
     response: str = Field(..., description="The AI assistant's response.")
     title: str = Field(..., description="The chat title.")
     sources: list[LawSource] = Field(
         default_factory=list,
         description="Law sources cited in the response."
     )
+
+class RateMessageRequest(BaseModel):
+    """Request body for rating an AI response."""
+    rating: str = Field(..., description="'like' or 'unlike'")
 
 
 class CreateChatRequest(BaseModel):
@@ -96,6 +101,7 @@ class MessageItem(BaseModel):
     role: str
     content: str
     created_at: str
+    rating: Optional[str] = None
 
 
 class ChatMessagesResponse(BaseModel):
@@ -116,6 +122,34 @@ class RAGStatusResponse(BaseModel):
     is_ready: bool
     total_chunks: int = 0
     law_types: list[str] = []
+
+
+# ─── File Analysis ───────────────────────────────────────
+
+# Allowed MIME types for file upload
+ALLOWED_MIME_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/heic",
+    "application/pdf",
+}
+
+MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+class FileAnalysisResponse(BaseModel):
+    """Response body after analyzing an uploaded file."""
+    chat_id: str = Field(..., description="The chat session ID.")
+    message_id: str = Field(..., description="The ID of the assistant's message in the database.")
+    response: str = Field(..., description="The AI assistant's analysis of the file.")
+    title: str = Field(..., description="The chat title.")
+    sources: list[LawSource] = Field(
+        default_factory=list,
+        description="Law sources cited in the response (if any)."
+    )
+    is_legal_document: bool = Field(
+        False,
+        description="Whether the AI identified this as a legal document."
+    )
 
 
 # ─── Health Check ────────────────────────────────────────────

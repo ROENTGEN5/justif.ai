@@ -19,7 +19,6 @@ import {
 } from "react-native";
 import { Link } from "expo-router";
 import Strings from "../../constants/Strings";
-import LogoPlaceholder from "../../components/LogoPlaceholder";
 import { useAuth } from "../../lib/auth";
 import { useTheme } from "../../lib/theme";
 
@@ -77,7 +76,36 @@ export default function LoginScreen() {
         >
           {/* ─── Logo Section ────────────────────────── */}
           <View style={{ alignItems: "center", marginBottom: 40 }}>
-            <LogoPlaceholder size="large" showTagline />
+            <Image
+              source={require("../../assets/logo.png")}
+              style={{
+                width: 100,
+                height: 100,
+                borderRadius: 20,
+                marginBottom: 12,
+              }}
+              resizeMode="cover"
+            />
+            <Text
+              style={{
+                fontSize: 16,
+                fontWeight: "800",
+                color: theme.text,
+                letterSpacing: 0.5,
+              }}
+            >
+              Justif.ai
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: theme.textSecondary,
+                fontStyle: "italic",
+                marginTop: 4,
+              }}
+            >
+              {Strings.tagline}
+            </Text>
           </View>
 
           {/* ─── Welcome Text ────────────────────────── */}

@@ -11,42 +11,132 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Image,
+  TextInput,
 } from "react-native";
-import { DrawerContentScrollView } from "@react-navigation/drawer";
+import { DrawerContentScrollView, useDrawerStatus } from "@react-navigation/drawer";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import Colors from "../constants/Colors";
 import Strings from "../constants/Strings";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme";
-import { getChats, deleteChat, Chat } from "../lib/api";
+import { getChats, deleteChat, Chat, getProfile, UserProfile } from "../lib/api";
 import { ThemeMode } from "../constants/Colors";
+
+// ─── Helpers ────────────────────────────────────────────────
+
+type GroupedItem =
+  | { type: "header"; label: string }
+  | { type: "chat"; chat: Chat };
+
+function groupChatsWithHeaders(chats: Chat[]): GroupedItem[] {
+  if (chats.length === 0) return [];
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const thisWeek = new Date(today);
+  thisWeek.setDate(thisWeek.getDate() - 7);
+  const thisMonth = new Date(today);
+  thisMonth.setDate(thisMonth.getDate() - 30);
+
+  const groups: { label: string; chats: Chat[] }[] = [
+    { label: "Today", chats: [] },
+    { label: "Yesterday", chats: [] },
+    { label: "This Week", chats: [] },
+    { label: "This Month", chats: [] },
+    { label: "Earlier", chats: [] },
+  ];
+
+  for (const chat of chats) {
+    const date = new Date(chat.updated_at);
+    if (date >= today) {
+      groups[0].chats.push(chat);
+    } else if (date >= yesterday) {
+      groups[1].chats.push(chat);
+    } else if (date >= thisWeek) {
+      groups[2].chats.push(chat);
+    } else if (date >= thisMonth) {
+      groups[3].chats.push(chat);
+    } else {
+      groups[4].chats.push(chat);
+    }
+  }
+
+  const result: GroupedItem[] = [];
+  for (const group of groups) {
+    if (group.chats.length > 0) {
+      result.push({ type: "header", label: group.label });
+      for (const chat of group.chats) {
+        result.push({ type: "chat", chat });
+      }
+    }
+  }
+
+  return result;
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date >= today) {
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } else if (date >= yesterday) {
+    return "Yesterday";
+  } else {
+    return date.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  }
+}
+
+// ─── Component ──────────────────────────────────────────────
 
 export default function DrawerContent(props: any) {
   const { user, signOut } = useAuth();
   const { mode, theme, setMode } = useTheme();
   const router = useRouter();
   const [chats, setChats] = useState<Chat[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch chats when drawer opens
-  const fetchChats = useCallback(async () => {
+  // Fetch chats and profile when drawer opens
+  const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await getChats();
-      setChats(data);
+      const [chatsData, profileData] = await Promise.all([
+        getChats(),
+        getProfile(),
+      ]);
+      setChats(chatsData);
+      setProfile(profileData);
     } catch (error) {
-      console.error("Failed to fetch chats:", error);
+      console.error("Failed to fetch data:", error);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchChats();
-    }, [fetchChats])
-  );
+  const isDrawerOpen = useDrawerStatus() === 'open';
+
+  useEffect(() => {
+    if (isDrawerOpen) {
+      fetchData();
+    }
+  }, [isDrawerOpen, fetchData]);
 
   const handleNewChat = () => {
     router.push("/(main)/chat");
@@ -77,14 +167,19 @@ export default function DrawerContent(props: any) {
   };
 
   const userDisplayName =
-    user?.user_metadata?.full_name || user?.email || "User";
+    profile?.full_name || user?.user_metadata?.full_name || user?.email || "User";
   const userEmail = user?.email || "";
+  const avatarUrl = profile?.avatar_url;
 
   const themeOptions: { key: ThemeMode; label: string; icon: string }[] = [
     { key: "light", label: Strings.lightMode, icon: "sunny-outline" },
     { key: "dark", label: Strings.darkMode, icon: "moon-outline" },
     { key: "night", label: Strings.nightMode, icon: "cloudy-night-outline" },
   ];
+
+  const filteredChats = chats.filter((chat) =>
+    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.drawerBg }}>
@@ -99,29 +194,17 @@ export default function DrawerContent(props: any) {
       >
         {/* Logo & Brand */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <View
+          <Image
+            source={require("../assets/logo.png")}
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: theme.logoCircleBg,
+              width: 44,
+              height: 44,
+              borderRadius: 22,
               borderWidth: 2,
               borderColor: theme.logoCircleBorder,
-              justifyContent: "center",
-              alignItems: "center",
             }}
-          >
-            <Text
-              style={{
-                fontSize: 20,
-                fontWeight: "900",
-                color: theme.logoText,
-                fontStyle: "italic",
-              }}
-            >
-              J
-            </Text>
-          </View>
+            resizeMode="cover"
+          />
           <View>
             <Text
               style={{
@@ -237,6 +320,39 @@ export default function DrawerContent(props: any) {
           {Strings.chatHistory}
         </Text>
 
+        {/* Search Bar */}
+        <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surfaceElevated,
+            borderRadius: 8,
+            paddingHorizontal: 10,
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}>
+            <Ionicons name="search" size={16} color={theme.textTertiary} />
+            <TextInput
+              style={{
+                flex: 1,
+                paddingVertical: 8,
+                paddingHorizontal: 8,
+                fontSize: 13,
+                color: theme.text,
+              }}
+              placeholder="Search conversations..."
+              placeholderTextColor={theme.textTertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <Ionicons name="close-circle" size={16} color={theme.textTertiary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
         {isLoading ? (
           <View style={{ paddingVertical: 20, alignItems: "center" }}>
             <ActivityIndicator size="small" color={theme.accent} />
@@ -262,62 +378,107 @@ export default function DrawerContent(props: any) {
                 textAlign: "center",
               }}
             >
-              {Strings.noChats}
+              {searchQuery.length > 0 ? "No matching conversations" : Strings.noChats}
             </Text>
           </View>
         ) : (
           <FlatList
-            data={chats}
-            keyExtractor={(item) => item.id}
+            data={groupChatsWithHeaders(filteredChats)}
+            keyExtractor={(item) =>
+              item.type === "header" ? `header-${item.label}` : item.chat.id
+            }
             showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => handleChatPress(item.id)}
-                onLongPress={() => handleDeleteChat(item.id)}
-                activeOpacity={0.7}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingVertical: 12,
-                  paddingHorizontal: 20,
-                  gap: 12,
-                  borderBottomWidth: 1,
-                  borderBottomColor: theme.divider,
-                }}
-              >
-                <Ionicons
-                  name="chatbubble-outline"
-                  size={18}
-                  color={theme.textTertiary}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text
-                    numberOfLines={1}
+            renderItem={({ item }) => {
+              if (item.type === "header") {
+                return (
+                  <View
                     style={{
-                      fontSize: 14,
-                      fontWeight: "500",
-                      color: theme.text,
+                      paddingHorizontal: 20,
+                      paddingTop: 16,
+                      paddingBottom: 6,
                     }}
                   >
-                    {item.title}
-                  </Text>
-                  <Text
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "800",
+                        color: theme.accent,
+                        letterSpacing: 0.8,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {item.label}
+                    </Text>
+                  </View>
+                );
+              }
+
+              const chat = item.chat;
+              const isFileChat = chat.title.startsWith("📎");
+
+              return (
+                <TouchableOpacity
+                  onPress={() => handleChatPress(chat.id)}
+                  onLongPress={() => handleDeleteChat(chat.id)}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: 11,
+                    paddingHorizontal: 20,
+                    gap: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: theme.divider,
+                  }}
+                >
+                  <View
                     style={{
-                      fontSize: 11,
-                      color: theme.textTertiary,
-                      marginTop: 2,
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      backgroundColor: theme.surfaceElevated,
+                      justifyContent: "center",
+                      alignItems: "center",
+                      borderWidth: 1,
+                      borderColor: theme.border,
                     }}
                   >
-                    {new Date(item.updated_at).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
+                    <Ionicons
+                      name={isFileChat ? "document-text-outline" : "chatbubble-outline"}
+                      size={15}
+                      color={theme.textTertiary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontSize: 14,
+                        fontWeight: "600",
+                        color: theme.text,
+                      }}
+                    >
+                      {chat.title}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: theme.textTertiary,
+                        marginTop: 2,
+                      }}
+                    >
+                      {formatRelativeTime(chat.updated_at)}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color={theme.textTertiary}
+                    style={{ opacity: 0.5 }}
+                  />
+                </TouchableOpacity>
+              );
+            }}
           />
         )}
       </View>
@@ -332,7 +493,12 @@ export default function DrawerContent(props: any) {
         }}
       >
         {/* User info */}
-        <View
+        <TouchableOpacity
+          onPress={() => {
+            router.push("/(main)/profile");
+            props.navigation.closeDrawer();
+          }}
+          activeOpacity={0.7}
           style={{
             flexDirection: "row",
             alignItems: "center",
@@ -350,13 +516,22 @@ export default function DrawerContent(props: any) {
               alignItems: "center",
               borderWidth: 1,
               borderColor: theme.border,
+              overflow: "hidden",
             }}
           >
-            <Ionicons
-              name="person-outline"
-              size={18}
-              color={theme.textSecondary}
-            />
+            {avatarUrl ? (
+              <Image 
+                key={avatarUrl}
+                source={{ uri: `${avatarUrl}?t=${new Date().getTime()}` }} 
+                style={{ width: "100%", height: "100%" }} 
+              />
+            ) : (
+              <Ionicons
+                name="person-outline"
+                size={18}
+                color={theme.textSecondary}
+              />
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <Text
@@ -379,7 +554,7 @@ export default function DrawerContent(props: any) {
               {userEmail}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Sign Out Button */}
         <TouchableOpacity

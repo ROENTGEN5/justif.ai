@@ -18,8 +18,15 @@ class Settings:
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
 
-    # Google Gemini
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # Groq (Llama 4 Scout)
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+
+    # Pinecone (Vector Database)
+    PINECONE_API_KEY: str = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME", "justifai-laws")
+
+    # Ollama (Embedding Server)
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     # CORS
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")

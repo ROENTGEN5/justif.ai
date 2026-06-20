@@ -5,10 +5,10 @@ Handles RAG-powered conversations with law retrieval, messaging, and history.
 
 import re
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from app.middleware.auth import get_current_user, AuthenticatedUser
 from app.services.supabase_client import get_user_client
-from app.services.gemini import generate_response
+from app.services.gemini import generate_response, analyze_file_content, transform_query_for_rag, generate_chat_title
 from app.services.rag import rag_service, LAW_TYPES
 from app.models.schemas import (
     ChatMessageRequest,
@@ -20,6 +20,11 @@ from app.models.schemas import (
     ChatMessagesResponse,
     LawSource,
     RAGStatusResponse,
+    FileAnalysisResponse,
+    ALLOWED_MIME_TYPES,
+    MAX_FILE_SIZE_BYTES,
+    MAX_FILE_SIZE_MB,
+    RateMessageRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,11 +63,12 @@ async def send_message(
     try:
         # If no chat_id, create a new chat session
         if not chat_id:
+            new_title = await generate_chat_title(request.message)
             chat_result = (
                 client.table("chats")
                 .insert({
                     "user_id": user.user_id,
-                    "title": request.message[:50] + ("..." if len(request.message) > 50 else ""),
+                    "title": new_title,
                 })
                 .execute()
             )
@@ -94,29 +100,49 @@ async def send_message(
             )
             previous_messages = messages_result.data or []
 
+        # ─── Detect conversational follow-ups ───────────────
+        FOLLOWUP_PHRASES = [
+            "summarize", "summarise", "summary",
+            "explain more", "elaborate", "can you explain",
+            "what does that mean", "what do you mean",
+            "simplify", "in simple terms", "give me an example",
+            "what should i do", "what can i do",
+            "tell me more", "more detail", "more information",
+            "can you clarify", "clarify that",
+        ]
+        msg_lower = request.message.lower().strip()
+        is_followup = any(phrase in msg_lower for phrase in FOLLOWUP_PHRASES)
+
         # ─── RAG: Retrieve relevant law chunks ──────────────
         sources = []
         context = ""
 
-        if rag_service.is_ready:
+        if rag_service.is_ready and not is_followup:
+            # Transform the raw user query into dense legal search keywords
+            # to maximise Pinecone retrieval precision before searching
+            search_query = await transform_query_for_rag(request.message)
+
             # Search with optional law type filter
             search_results = rag_service.search(
-                query=request.message,
+                query=search_query,
                 top_k=5,
                 law_types=request.law_types,
             )
 
-            # Format context for the prompt
-            context = rag_service.format_context(search_results)
-
-            # Extract unique source citations
+            # Extract unique source citations FIRST (deduplicate by title)
             raw_sources = rag_service.get_sources(search_results)
             sources = [LawSource(**s) for s in raw_sources]
+
+            # Format context using only deduplicated sources so the AI
+            # sees the same numbered sources the user will see
+            context = rag_service.format_context_from_sources(search_results, raw_sources)
 
             logger.info(
                 f"RAG retrieved {len(search_results)} chunks, "
                 f"{len(sources)} unique sources for user={user.user_id}"
             )
+        elif is_followup:
+            logger.info(f"Conversational follow-up detected — skipping RAG for user={user.user_id}")
         else:
             logger.warning("RAG service not ready. Generating response without legal context.")
 
@@ -127,19 +153,25 @@ async def send_message(
             "content": request.message,
         }).execute()
 
-        # Generate AI response using Gemini with RAG context
-        ai_response = await generate_response(
-            messages=previous_messages,
-            user_message=request.message,
-            context=context,
-        )
+        # Generate AI response using RAG context (or conversation history for follow-ups)
+        if context or is_followup:
+            is_initial = len(previous_messages) == 0
+            ai_response = await generate_response(
+                messages=previous_messages,
+                user_message=request.message,
+                context=context,  # empty string for follow-ups — AI uses history only
+                is_initial_query=is_initial,
+            )
+        else:
+            ai_response = "Justif.ai cannot answer this query right now."
 
         # Store the AI response
-        client.table("messages").insert({
+        ai_res = client.table("messages").insert({
             "chat_id": chat_id,
             "role": "assistant",
             "content": ai_response,
         }).execute()
+        message_id = ai_res.data[0]["id"] if hasattr(ai_res, "data") and ai_res.data else ""
 
         # Update the chat's updated_at timestamp
         client.table("chats").update({
@@ -157,6 +189,7 @@ async def send_message(
 
         return ChatMessageResponse(
             chat_id=chat_id,
+            message_id=message_id,
             response=ai_response,
             title=title,
             sources=sources,
@@ -170,6 +203,31 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message. Please try again.",
         )
+
+
+@router.patch("/messages/{message_id}/rate")
+async def rate_message(
+    message_id: str,
+    request: RateMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Rate an assistant's message."""
+    client = get_user_client(user.token)
+    try:
+        # The database policy ensures they can only update messages in their own chats
+        res = client.table("messages").update({
+            "rating": request.rating
+        }).eq("id", message_id).execute()
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Message not found or access denied")
+        
+        return {"status": "success", "message": "Rating updated."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rating message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to rate message.")
 
 
 @router.get("/rag/status", response_model=RAGStatusResponse)
@@ -349,4 +407,198 @@ async def delete_chat(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete conversation. Please try again.",
+        )
+
+
+@router.delete("/chats")
+async def delete_all_chats(
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Delete all chats for the authenticated user."""
+    try:
+        client = get_user_client(user.token)
+        # Delete all chats for this user (messages cascade)
+        # The RLS policy also enforces the user_id
+        client.table("chats").delete().eq("user_id", user.user_id).execute()
+
+        return {"detail": "All chats deleted successfully."}
+
+    except Exception as e:
+        logger.error(f"Failed to delete all chats for user={user.user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete conversations. Please try again.",
+        )
+
+
+@router.post("/chat/analyze-file", response_model=FileAnalysisResponse)
+async def analyze_uploaded_file(
+    file: UploadFile = File(..., description="Image or PDF file to analyze"),
+    chat_id: str | None = Form(None, description="Existing chat ID (UUID)"),
+    user_prompt: str | None = Form(None, description="Optional additional question about the file"),
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Analyze an uploaded file (image or PDF) for legal content.
+    Extracts text, identifies legal jargon, and explains it in plain English.
+    """
+    # ── Validate file type ────────────────────────────────────
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {content_type}. "
+                   f"Allowed types: images (JPEG, PNG, WebP, HEIC) and PDF.",
+        )
+
+    # ── Read and validate file size ───────────────────────────
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE_MB}MB.",
+        )
+
+    if len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file is empty.",
+        )
+
+    filename = file.filename or "uploaded_file"
+
+    # ── Validate chat_id if provided ─────────────────────────
+    if chat_id:
+        _validate_uuid(chat_id, "chat_id")
+
+    client = get_user_client(user.token)
+
+    try:
+        # ── Create or verify chat session ─────────────────────
+        is_new_chat = False
+        if not chat_id:
+            chat_result = (
+                client.table("chats")
+                .insert({
+                    "user_id": user.user_id,
+                    "title": "📎 Analyzing Document...",
+                })
+                .execute()
+            )
+            chat_id = chat_result.data[0]["id"]
+            previous_messages = []
+            is_new_chat = True
+        else:
+            # Verify chat belongs to this user
+            chat_check = (
+                client.table("chats")
+                .select("id, user_id")
+                .eq("id", chat_id)
+                .eq("user_id", user.user_id)
+                .execute()
+            )
+            if not chat_check.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Chat not found or access denied.",
+                )
+
+            # Fetch existing messages for context
+            messages_result = (
+                client.table("messages")
+                .select("role, content")
+                .eq("chat_id", chat_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            previous_messages = messages_result.data or []
+
+        # ── Store the user's file upload message ─────────────
+        user_content = f"📎 Uploaded: {filename}"
+        if user_prompt:
+            user_content += f"\n\n{user_prompt}"
+
+        client.table("messages").insert({
+            "chat_id": chat_id,
+            "role": "user",
+            "content": user_content,
+        }).execute()
+
+        # ── Analyze file with Gemini ─────────────────────────
+        logger.info(
+            f"Analyzing file '{filename}' ({content_type}, {len(file_bytes)} bytes) "
+            f"for user={user.user_id}"
+        )
+
+        if rag_service.is_ready:
+            ai_response = await analyze_file_content(
+                file_bytes=file_bytes,
+                mime_type=content_type,
+                filename=filename,
+                messages=previous_messages,
+                user_prompt=user_prompt or "",
+            )
+
+            # ── Determine if legal document from response ────────
+            is_legal = not any(
+                phrase in ai_response.lower()
+                for phrase in [
+                    "does not appear to be a legal document",
+                    "not a legal document",
+                    "this is not a legal",
+                    "foreign legal document",
+                    "outside philippine jurisdiction",
+                ]
+            )
+        else:
+            ai_response = "Justif.ai cannot answer this query right now."
+            is_legal = False
+
+        # ── Store the AI response ────────────────────────────
+        ai_res = client.table("messages").insert({
+            "chat_id": chat_id,
+            "role": "assistant",
+            "content": ai_response,
+        }).execute()
+        message_id = ai_res.data[0]["id"] if hasattr(ai_res, "data") and ai_res.data else ""
+
+        # Update the chat's updated_at timestamp (and title if new chat)
+        update_data = {"updated_at": "now()"}
+        if is_new_chat:
+            if user_prompt:
+                new_title = await generate_chat_title(user_prompt)
+            else:
+                new_title = await generate_chat_title(ai_response[:300])
+            update_data["title"] = f"📎 {new_title}"
+
+        client.table("chats").update(update_data).eq("id", chat_id).execute()
+
+        # Get the chat title
+        chat_data = (
+            client.table("chats")
+            .select("title")
+            .eq("id", chat_id)
+            .execute()
+        )
+        title = chat_data.data[0]["title"] if chat_data.data else f"📎 {filename}"
+
+        return FileAnalysisResponse(
+            chat_id=chat_id,
+            message_id=message_id,
+            response=ai_response,
+            title=title,
+            sources=[],
+            is_legal_document=is_legal,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error analyzing file for user={user.user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze file. Please try again.",
         )

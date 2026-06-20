@@ -52,23 +52,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# ─── Lifespan: Load RAG index on startup ────────────────────
+# ─── Lifespan: Connect to Pinecone on startup ───────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the FAISS index and chunk metadata when the server starts."""
+    """Connect to Pinecone vector database and verify Ollama when the server starts."""
     logger.info("🚀 Starting Justif.ai API...")
 
-    # Initialize the RAG service (loads FAISS index into memory)
+    # Initialize the RAG service (connects to Pinecone + checks Ollama)
     try:
         rag_service.initialize()
         if rag_service.is_ready:
             logger.info(
-                f"✅ RAG service ready: {len(rag_service.chunks)} chunks loaded"
+                f"✅ RAG service ready: {len(rag_service.chunks)} vectors in Pinecone"
             )
         else:
             logger.warning(
-                "⚠️  RAG index not found. Run 'python -m scripts.build_index' first."
+                "⚠️  RAG service not ready. Check Pinecone API key and run 'python -m scripts.build_index' first."
             )
     except Exception as e:
         logger.error(f"❌ Failed to initialize RAG service: {e}")
@@ -85,7 +85,7 @@ app = FastAPI(
     description=(
         "Justif.ai — Ang iyong munting Abogado. "
         "A Filipino legal AI assistant powered by RAG over 13,953 Philippine laws "
-        "and Google Gemini."
+        "and Groq Llama 4 Scout."
     ),
     version="1.0.0",
     docs_url="/docs" if settings.DEBUG else None,

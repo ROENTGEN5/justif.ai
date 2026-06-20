@@ -1,20 +1,20 @@
 """
 Justif.ai — RAG (Retrieval-Augmented Generation) Service
-Handles CSV loading, text chunking, embedding, and FAISS vector search
+Handles CSV loading, text chunking, Ollama embedding, and Pinecone vector search
 over 13,953 Philippine laws.
+
+Vector DB: Pinecone (serverless)
+Embeddings: Ollama nomic-embed-text (768-dim)
 """
 
 import csv
 import json
-import os
-import pickle
 import logging
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-import faiss
-from google import genai
+import ollama
+from pinecone import Pinecone
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -23,13 +23,11 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 CSV_PATH = DATA_DIR / "final_clean_laws.csv"
-INDEX_PATH = DATA_DIR / "faiss_index.bin"
-METADATA_PATH = DATA_DIR / "chunks_metadata.pkl"
 
-EMBEDDING_MODEL = "gemini-embedding-001"
-CHUNK_SIZE = 1000       # chars per chunk
-CHUNK_OVERLAP = 200     # overlap between chunks
-EMBEDDING_DIM = 3072    # dimension of gemini-embedding-001
+EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_DIM = 768         # dimension of nomic-embed-text
+CHUNK_SIZE = 1000           # chars per chunk
+CHUNK_OVERLAP = 200         # overlap between chunks
 
 # All available law type labels
 LAW_TYPES = [
@@ -218,150 +216,109 @@ def load_and_chunk_csv(csv_path: str = None, max_laws: int = None) -> list[Chunk
     return all_chunks
 
 
-# ─── Embedding ──────────────────────────────────────────────
+# ─── Ollama Embedding ───────────────────────────────────────
 
 
-def get_embeddings_batch(
-    client: genai.Client,
-    texts: list[str],
-    batch_size: int = 100,
-) -> np.ndarray:
+# Ollama client — initialized with configurable host
+_ollama_client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+
+
+def embed_query(text: str) -> list[float]:
     """
-    Embed a list of texts using Gemini's embedding model.
-    Processes in batches to respect API limits (15 RPM).
+    Embed a single query string using Ollama nomic-embed-text.
+
+    For nomic-embed-text, prepend 'search_query: ' for queries
+    and 'search_document: ' for documents to improve retrieval quality.
     """
-    import time
-    all_embeddings = []
-    total = len(texts)
-
-    for i in range(0, total, batch_size):
-        batch = texts[i : i + batch_size]
-        success = False
-        retries = 3
-        while not success and retries > 0:
-            try:
-                response = client.models.embed_content(
-                    model=EMBEDDING_MODEL,
-                    contents=batch,
-                )
-                batch_embeddings = [e.values for e in response.embeddings]
-                all_embeddings.extend(batch_embeddings)
-                success = True
-
-                if (i // batch_size) % 10 == 0:
-                    logger.info(f"  Embedded {min(i + batch_size, total)}/{total} chunks...")
-                
-                # Respect the 15 RPM limit (1 req every 4 seconds)
-                time.sleep(4)
-
-            except Exception as e:
-                error_str = str(e)
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    logger.warning(f"  Rate limit hit at batch {i}. Sleeping for 60s...")
-                    time.sleep(60)
-                    retries -= 1
-                else:
-                    logger.error(f"  Embedding error at batch {i}: {e}")
-                    break
-        
-        if not success:
-            logger.error(f"  Failed batch {i} after retries. Filling with zeros.")
-            for _ in batch:
-                all_embeddings.append([0.0] * EMBEDDING_DIM)
-
-    return np.array(all_embeddings, dtype=np.float32)
-
-
-def embed_query(client: genai.Client, query: str) -> np.ndarray:
-    """Embed a single query string."""
-    response = client.models.embed_content(
+    response = _ollama_client.embed(
         model=EMBEDDING_MODEL,
-        contents=[query],
+        input=f"search_query: {text}",
     )
-    return np.array([response.embeddings[0].values], dtype=np.float32)
+    return response["embeddings"][0]
 
 
-# ─── FAISS Index ────────────────────────────────────────────
-
-
-def build_faiss_index(embeddings: np.ndarray) -> faiss.IndexFlatIP:
+def embed_documents(texts: list[str]) -> list[list[float]]:
     """
-    Build a FAISS index from embeddings.
-    Uses Inner Product (cosine similarity after normalization).
+    Embed a batch of document texts using Ollama nomic-embed-text.
+    Prepends 'search_document: ' prefix for document embeddings.
     """
-    # Normalize embeddings for cosine similarity
-    faiss.normalize_L2(embeddings)
-
-    # Build the index
-    index = faiss.IndexFlatIP(EMBEDDING_DIM)
-    index.add(embeddings)
-
-    logger.info(f"Built FAISS index with {index.ntotal} vectors")
-    return index
+    prefixed = [f"search_document: {t}" for t in texts]
+    response = _ollama_client.embed(
+        model=EMBEDDING_MODEL,
+        input=prefixed,
+    )
+    return response["embeddings"]
 
 
-def save_index(index: faiss.IndexFlatIP, chunks: list[ChunkMetadata]):
-    """Save the FAISS index and chunk metadata to disk."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    faiss.write_index(index, str(INDEX_PATH))
-    logger.info(f"Saved FAISS index to {INDEX_PATH}")
-
-    with open(METADATA_PATH, "wb") as f:
-        pickle.dump(chunks, f)
-    logger.info(f"Saved metadata to {METADATA_PATH}")
-
-
-def load_index() -> tuple[faiss.IndexFlatIP, list[ChunkMetadata]]:
-    """Load the FAISS index and chunk metadata from disk."""
-    if not INDEX_PATH.exists() or not METADATA_PATH.exists():
-        raise FileNotFoundError(
-            f"RAG index not found. Run 'python -m scripts.build_index' first.\n"
-            f"Expected: {INDEX_PATH} and {METADATA_PATH}"
-        )
-
-    index = faiss.read_index(str(INDEX_PATH))
-    logger.info(f"Loaded FAISS index with {index.ntotal} vectors")
-
-    with open(METADATA_PATH, "rb") as f:
-        chunks = pickle.load(f)
-    logger.info(f"Loaded {len(chunks)} chunk metadata entries")
-
-    return index, chunks
-
-
-# ─── Search ─────────────────────────────────────────────────
+# ─── Pinecone Search ───────────────────────────────────────
 
 
 class RAGService:
     """
     RAG Service singleton.
-    Loads the FAISS index once and handles all search requests.
+    Connects to Pinecone index and handles all search requests.
+    Uses Ollama nomic-embed-text for query embedding.
     """
 
     def __init__(self):
-        self.index: Optional[faiss.IndexFlatIP] = None
-        self.chunks: Optional[list[ChunkMetadata]] = None
-        self.client: Optional[genai.Client] = None
+        self.index = None
+        self._total_vectors: int = 0
         self._loaded = False
 
     def initialize(self):
-        """Load the index and initialize the embedding client."""
+        """Connect to Pinecone index and verify Ollama is available."""
         if self._loaded:
             return
 
         try:
-            self.index, self.chunks = load_index()
-            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            # Connect to Pinecone
+            if not settings.PINECONE_API_KEY:
+                logger.warning("PINECONE_API_KEY not set. RAG service disabled.")
+                return
+
+            pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+            self.index = pc.Index(settings.PINECONE_INDEX_NAME)
+
+            # Get index stats to verify connection
+            stats = self.index.describe_index_stats()
+            self._total_vectors = stats.total_vector_count
+            logger.info(
+                f"Connected to Pinecone index '{settings.PINECONE_INDEX_NAME}' "
+                f"with {self._total_vectors} vectors"
+            )
+
+            # Verify Ollama is available with the embedding model
+            try:
+                _ollama_client.show(EMBEDDING_MODEL)
+                logger.info(f"Ollama model '{EMBEDDING_MODEL}' is available")
+            except Exception as e:
+                logger.warning(
+                    f"Ollama model '{EMBEDDING_MODEL}' not available: {e}. "
+                    f"Run 'ollama pull {EMBEDDING_MODEL}' to download it."
+                )
+                # Don't fail — Ollama might be available later or on a different host
+                pass
+
             self._loaded = True
             logger.info("RAG service initialized successfully.")
-        except FileNotFoundError as e:
-            logger.warning(f"RAG index not available: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize RAG service: {e}")
             self._loaded = False
 
     @property
     def is_ready(self) -> bool:
         return self._loaded and self.index is not None
+
+    @property
+    def chunks(self) -> Optional[list]:
+        """
+        Compatibility property — returns a list-like object with correct length.
+        Used by /api/rag/status endpoint to report total_chunks.
+        """
+        if self._total_vectors > 0:
+            return [None] * self._total_vectors
+        return None
 
     def search(
         self,
@@ -384,36 +341,49 @@ class RAGService:
             logger.warning("RAG service not initialized. Returning empty results.")
             return []
 
-        # Embed the query
-        query_embedding = embed_query(self.client, query)
-        faiss.normalize_L2(query_embedding)
+        try:
+            # Embed the query using Ollama
+            query_embedding = embed_query(query)
 
-        # Search more than top_k if filtering, to ensure we get enough results
-        search_k = top_k * 4 if law_types else top_k
+            # Build Pinecone metadata filter
+            pinecone_filter = None
+            if law_types:
+                pinecone_filter = {"label": {"$in": law_types}}
 
-        distances, indices = self.index.search(query_embedding, search_k)
+            # Query Pinecone
+            query_response = self.index.query(
+                vector=query_embedding,
+                top_k=top_k,
+                include_metadata=True,
+                filter=pinecone_filter,
+            )
 
-        results = []
-        for score, idx in zip(distances[0], indices[0]):
-            if idx < 0 or idx >= len(self.chunks):
-                continue
+            # Convert Pinecone results to SearchResult objects
+            results = []
+            for match in query_response.matches:
+                meta = match.metadata or {}
+                chunk = ChunkMetadata(
+                    short_title=meta.get("short_title", ""),
+                    full_title=meta.get("full_title", ""),
+                    law_type=meta.get("law_type", ""),
+                    date=meta.get("date", ""),
+                    url=meta.get("url", ""),
+                    label=meta.get("label", ""),
+                    chunk_index=meta.get("chunk_index", 0),
+                    total_chunks=meta.get("total_chunks", 1),
+                    text=meta.get("text", ""),
+                )
+                results.append(SearchResult(chunk=chunk, score=match.score))
 
-            chunk = self.chunks[idx]
+            return results
 
-            # Apply law type filter
-            if law_types and chunk.label not in law_types:
-                continue
-
-            results.append(SearchResult(chunk=chunk, score=score))
-
-            if len(results) >= top_k:
-                break
-
-        return results
+        except Exception as e:
+            logger.error(f"RAG search error: {e}", exc_info=True)
+            return []
 
     def format_context(self, results: list[SearchResult]) -> str:
         """
-        Format search results into a context string for the Gemini prompt.
+        Format search results into a context string for the LLM prompt.
         """
         if not results:
             return "Walang nakitang relevant na batas sa database."
@@ -429,6 +399,59 @@ class RAGService:
                 f"URL: {chunk.url}\n"
                 f"Content:\n{chunk.text}\n"
             )
+
+        return "\n".join(context_parts)
+
+    def format_context_from_sources(
+        self,
+        results: list[SearchResult],
+        deduplicated_sources: list[dict],
+    ) -> str:
+        """
+        Format context for the LLM using deduplicated source numbering.
+
+        Groups chunks by their source title and numbers them to match
+        the deduplicated sources list, so "Source 1" in the AI's context
+        corresponds exactly to Source 1 in the user's SourceCard.
+        """
+        if not results:
+            return "Walang nakitang relevant na batas sa database."
+
+        # Map each deduplicated source to its index (1-based)
+        source_index_map: dict[str, int] = {}
+        for i, src in enumerate(deduplicated_sources):
+            key = src.get("short_title") or src.get("full_title", "")
+            if key and key not in source_index_map:
+                source_index_map[key] = i + 1
+
+        # Build context grouped by source number
+        context_parts = []
+        seen_sources: set[int] = set()
+
+        for result in results:
+            chunk = result.chunk
+            key = chunk.short_title or chunk.full_title
+            source_num = source_index_map.get(key)
+            if source_num is None:
+                continue
+
+            # Only add the header once per unique source
+            if source_num not in seen_sources:
+                seen_sources.add(source_num)
+                context_parts.append(
+                    f"--- Law Source {source_num} ---\n"
+                    f"Title: {chunk.short_title or chunk.full_title}\n"
+                    f"Type: {chunk.label}\n"
+                    f"Date: {chunk.date or 'N/A'}\n"
+                    f"URL: {chunk.url}\n"
+                    f"Content:\n{chunk.text}\n"
+                )
+            else:
+                # Additional chunks from the same source — append content only
+                context_parts.append(
+                    f"--- Law Source {source_num} (continued) ---\n"
+                    f"Content:\n{chunk.text}\n"
+                )
 
         return "\n".join(context_parts)
 

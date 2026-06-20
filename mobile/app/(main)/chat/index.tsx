@@ -1,6 +1,7 @@
 /**
  * New Chat Screen (Default)
- * RAG-powered chat with law type filtering and source citations.
+ * RAG-powered chat with law type filtering, source citations,
+ * and file upload for legal document analysis.
  */
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
@@ -11,6 +12,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useRouter } from "expo-router";
@@ -20,7 +22,13 @@ import ChatInput from "../../../components/ChatInput";
 import LoadingDots from "../../../components/LoadingDots";
 import SourceCard from "../../../components/SourceCard";
 import FilterChips from "../../../components/FilterChips";
-import { sendMessage, getLawTypes, LawSource } from "../../../lib/api";
+import {
+  sendMessage,
+  getLawTypes,
+  analyzeFile,
+  LawSource,
+  FileAttachment,
+} from "../../../lib/api";
 import { useTheme } from "../../../lib/theme";
 
 interface DisplayMessage {
@@ -39,6 +47,25 @@ export default function NewChatScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+
+  const [randomSuggestions] = useState(() => {
+    const allSuggestions = [
+      "What are my rights as an employee?",
+      "How do I file a small claims case?",
+      "What is the process for annulment?",
+      "What are the requirements for legal separation?",
+      "Can my employer fire me without cause?",
+      "How do I deal with a bouncing check?",
+      "What are the rights of a tenant?",
+      "How to file a cyber libel complaint?",
+      "What are the rules on overtime pay?",
+      "How do I adopt a child legally?",
+      "What constitutes sexual harassment in the workplace?",
+      "How can I change my legal name?",
+      "What is the Anti-Violence Against Women and Their Children Act?"
+    ];
+    return [...allSuggestions].sort(() => 0.5 - Math.random()).slice(0, 3);
+  });
 
   // Filter state
   const [lawTypes, setLawTypes] = useState<string[]>([]);
@@ -101,6 +128,47 @@ export default function NewChatScreen() {
     [chatId, selectedTypes]
   );
 
+  const handleFileSelected = useCallback(
+    async (file: FileAttachment) => {
+      const userMsg: DisplayMessage = {
+        id: `user-file-${Date.now()}`,
+        role: "user",
+        content: `📎 Uploaded: ${file.name}`,
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, userMsg]);
+      setIsLoading(true);
+
+      try {
+        const response = await analyzeFile(
+          file,
+          chatId || undefined,
+        );
+
+        if (!chatId) {
+          setChatId(response.chat_id);
+        }
+
+        const assistantMsg: DisplayMessage = {
+          id: `assistant-file-${Date.now()}`,
+          role: "assistant",
+          content: response.response,
+          created_at: new Date().toISOString(),
+          sources: response.sources,
+        };
+
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (error: any) {
+        Alert.alert("Error", error.message || Strings.fileUploadError);
+        setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [chatId]
+  );
+
   const scrollToBottom = useCallback(() => {
     if (flatListRef.current && messages.length > 0) {
       setTimeout(() => {
@@ -122,30 +190,16 @@ export default function NewChatScreen() {
           paddingVertical: 60,
         }}
       >
-        <View
+        <Image
+          source={require("../../../assets/logo.png")}
           style={{
-            width: 72,
-            height: 72,
-            borderRadius: 36,
-            backgroundColor: theme.surfaceElevated,
-            justifyContent: "center",
-            alignItems: "center",
+            width: 80,
+            height: 80,
             marginBottom: 20,
-            borderWidth: 1,
-            borderColor: theme.border,
+            borderRadius: 16,
           }}
-        >
-          <Text
-            style={{
-              fontSize: 36,
-              fontWeight: "900",
-              color: theme.text,
-              fontStyle: "italic",
-            }}
-          >
-            J
-          </Text>
-        </View>
+          resizeMode="cover"
+        />
 
         <Text
           style={{
@@ -172,11 +226,7 @@ export default function NewChatScreen() {
 
         {/* Suggestion chips */}
         <View style={{ marginTop: 28, gap: 10, width: "100%" }}>
-          {[
-            "What are my rights as an employee?",
-            "How do I file a small claims case?",
-            "What is the process for annulment?",
-          ].map((suggestion, index) => (
+          {randomSuggestions.map((suggestion, index) => (
             <View
               key={index}
               style={{
@@ -221,7 +271,7 @@ export default function NewChatScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior="padding"
       keyboardVerticalOffset={headerHeight}
     >
       <View style={{ flex: 1, backgroundColor: theme.background }}>
@@ -254,7 +304,11 @@ export default function NewChatScreen() {
         />
       )}
 
-        <ChatInput onSend={handleSend} isLoading={isLoading} />
+        <ChatInput
+          onSend={handleSend}
+          onFileSelected={handleFileSelected}
+          isLoading={isLoading}
+        />
       </View>
     </KeyboardAvoidingView>
   );

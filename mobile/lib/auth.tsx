@@ -10,22 +10,23 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import { Alert } from "react-native";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import Strings from "../constants/Strings";
-import {
-  GoogleSignin,
-  statusCodes,
-} from "@react-native-google-signin/google-signin";
+// import {
+//   GoogleSignin,
+//   statusCodes,
+// } from "@react-native-google-signin/google-signin";
 
 // ─── Configure Google Sign-In ───────────────────────────────
 
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
-  offlineAccess: true,
-});
+// GoogleSignin.configure({
+//   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
+//   offlineAccess: true,
+// });
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -76,12 +77,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log("[AuthProvider] Starting auth init...");
 
     // Safety timeout — if auth takes too long, stop loading anyway
+    // (15s to accommodate slower mobile networks)
     const timeout = setTimeout(() => {
       console.warn("[AuthProvider] TIMEOUT fired — forcing isLoading to false");
       if (isMounted) {
         setIsLoading(false);
       }
-    }, 5000);
+    }, 15000);
 
     // Get initial session
     console.log("[AuthProvider] Calling getSession()...");
@@ -101,12 +103,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-    // Subscribe to auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       console.log("[AuthProvider] onAuthStateChange:", _event, "session:", !!session);
       if (isMounted) {
+        // If we are artificially signing out immediately after registration to prevent auto-login,
+        // we might not want to immediately broadcast the session if we're just going to destroy it.
+        // However, Supabase forces this event. We will let it pass, but if `isRegisteringRef.current` is true,
+        // we will IGNORE the session update to prevent the _layout from flashing the main screen.
+        if (isRegisteringRef.current && session) {
+           console.log("[AuthProvider] Ignoring session because isRegisteringRef is true");
+           return;
+        }
+
         setSession(session);
         setUser(session?.user ?? null);
         setIsLoading(false);
@@ -119,6 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  const isRegisteringRef = useRef(false);
 
   // Sign in with email/password
   const signIn = useCallback(async (email: string, password: string) => {
@@ -135,18 +147,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sign up with email/password
   const signUp = useCallback(
     async (email: string, password: string, fullName: string) => {
-      const { error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
+      isRegisteringRef.current = true;
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+            },
           },
-        },
-      });
+        });
 
-      if (error) {
-        throw new Error(error.message);
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        // If auto-logged in, sign out immediately
+        if (data?.session) {
+          await supabase.auth.signOut();
+        }
+      } finally {
+        isRegisteringRef.current = false;
       }
     },
     []
@@ -154,43 +176,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign in with Google (native)
   const signInWithGoogle = useCallback(async () => {
-    try {
-      // Check if Google Play Services are available
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-
-      // Trigger Google Sign-In
-      const signInResult = await GoogleSignin.signIn();
-
-      // Get the ID token from the sign-in result
-      const idToken = signInResult?.data?.idToken;
-
-      if (!idToken) {
-        throw new Error("No ID token received from Google.");
-      }
-
-      // Sign in to Supabase with the Google ID token
-      const { error } = await supabase.auth.signInWithIdToken({
-        provider: "google",
-        token: idToken,
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-    } catch (error: any) {
-      // Handle specific Google Sign-In errors
-      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // User cancelled — silently return
-        return;
-      } else if (error.code === statusCodes.IN_PROGRESS) {
-        // Sign-in already in progress
-        return;
-      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        throw new Error("Google Play Services is not available on this device.");
-      } else {
-        throw error;
-      }
-    }
+    Alert.alert(
+      "Not Available in Expo Go",
+      "Google Sign-In requires native modules that are not included in Expo Go. Please use a development build to test this feature, or use Email/Password sign in for now."
+    );
+    return;
   }, []);
 
   // Sign out
@@ -202,14 +192,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         style: "destructive",
         onPress: async () => {
           // Also sign out of Google if signed in
-          try {
-            const isSignedIn = GoogleSignin.getCurrentUser();
-            if (isSignedIn) {
-              await GoogleSignin.signOut();
-            }
-          } catch (e) {
-            // Ignore Google sign-out errors
-          }
+          // try {
+          //   const isSignedIn = GoogleSignin.getCurrentUser();
+          //   if (isSignedIn) {
+          //     await GoogleSignin.signOut();
+          //   }
+          // } catch (e) {
+          //   // Ignore Google sign-out errors
+          // }
 
           const { error } = await supabase.auth.signOut();
           if (error) {

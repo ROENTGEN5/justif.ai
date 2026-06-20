@@ -2,8 +2,9 @@
 Authentication Middleware
 Verifies Supabase JWTs to protect API endpoints.
 Supports both HMAC (HS256) and ECDSA (ES256) signed tokens.
-"""
+""" 
 
+# pyrefly: ignore [missing-import]
 import jwt
 import base64
 import logging

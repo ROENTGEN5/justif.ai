@@ -22,7 +22,7 @@ function RootLayoutNav() {
   const { theme } = useTheme();
   const segments = useSegments();
   const router = useRouter();
-  
+
   console.log("[RootLayoutNav] isLoading:", isLoading, "session:", !!session, "segments:", segments);
 
   useEffect(() => {
@@ -32,11 +32,11 @@ function RootLayoutNav() {
     console.log("[RootLayoutNav] Redirect check — inAuthGroup:", inAuthGroup, "session:", !!session);
 
     if (!session && !inAuthGroup) {
-      router.replace("/(auth)/login");
+      router.replace("/(auth)/register");
     } else if (session && inAuthGroup) {
       router.replace("/(main)/chat");
     }
-    
+
     // Hide splash screen once loading is complete and routing is handled
     SplashScreen.hideAsync();
   }, [session, isLoading, segments]);

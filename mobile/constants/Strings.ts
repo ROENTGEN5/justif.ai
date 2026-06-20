@@ -44,6 +44,8 @@ export const Strings = {
   noChats: "You don't have any conversations yet.",
   deleteChat: "Delete Conversation",
   deleteChatConfirm: "Are you sure you want to delete this conversation?",
+  deleteAllChats: "Delete All Chat History",
+  deleteAllChatsConfirm: "Are you sure you want to delete all your conversations? This action cannot be undone.",
 
   // ─── Drawer / Navigation ────────────────────────────
   signOut: "Sign Out",
@@ -83,6 +85,17 @@ export const Strings = {
   filterClear: "Clear filter",
   ragSearching: "Searching for relevant laws...",
   noSourcesFound: "No specific laws found for this query.",
+
+  // ─── File Upload ──────────────────────────────────────
+  attachFile: "Attach File",
+  takePhoto: "Take Photo",
+  chooseFromGallery: "Choose from Gallery",
+  chooseDocument: "Choose Document (PDF)",
+  analyzing: "Analyzing document...",
+  fileTooLarge: "File is too large. Maximum size is 10MB.",
+  unsupportedFile: "Unsupported file type. Please upload an image or PDF.",
+  fileUploadError: "Failed to upload file. Please try again.",
+  cancelUpload: "Cancel",
 } as const;
 
 export default Strings;

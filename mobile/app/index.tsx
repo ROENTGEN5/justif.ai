@@ -14,5 +14,5 @@ export default function Index() {
     return <Redirect href="/(main)/chat" />;
   }
 
-  return <Redirect href="/(auth)/login" />;
+  return <Redirect href="/(auth)/register" />;
 }
