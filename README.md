@@ -1,6 +1,6 @@
 # Justif.ai
 
-**"Ang iyong munting Abogado"** — Your Little Lawyer
+
 
 A beautifully designed, production-ready Filipino legal AI assistant mobile application powered by Google Gemini, Supabase, and React Native (Expo).
 
