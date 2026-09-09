@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 # Initialize the Groq async client
 client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
-# Model to use — Llama 4 Scout with vision support
-MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
+# Model to use — multimodal LLM via Groq
+MODEL_ID = getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b")
 
 # System instruction for Justif.ai with RAG context
 SYSTEM_INSTRUCTION = """You are Justif.ai, an expert Legal AI Assistant and Educator specialized in Philippine law. Do not introduce yourself with titles like "Your little lawyer" or explicitly state your role in your responses.

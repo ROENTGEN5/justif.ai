@@ -90,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
         console.log("[AuthProvider] getSession resolved, session:", !!session);
+        clearTimeout(timeout);
         if (isMounted) {
           setSession(session);
           setUser(session?.user ?? null);
@@ -98,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((error) => {
         console.error("[AuthProvider] getSession error:", error);
+        clearTimeout(timeout);
         if (isMounted) {
           setIsLoading(false);
         }

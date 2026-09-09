@@ -14,7 +14,6 @@ import {
   Image,
   TextInput,
 } from "react-native";
-import { DrawerContentScrollView, useDrawerStatus } from "@react-navigation/drawer";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Colors from "../constants/Colors";
@@ -130,13 +129,9 @@ export default function DrawerContent(props: any) {
     }
   }, []);
 
-  const isDrawerOpen = useDrawerStatus() === 'open';
-
   useEffect(() => {
-    if (isDrawerOpen) {
-      fetchData();
-    }
-  }, [isDrawerOpen, fetchData]);
+    fetchData();
+  }, [fetchData]);
 
   const handleNewChat = () => {
     router.push("/(main)/chat");

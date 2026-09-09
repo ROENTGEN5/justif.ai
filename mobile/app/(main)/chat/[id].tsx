@@ -18,7 +18,6 @@ import {
   Platform,
 } from "react-native";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams } from "expo-router";
 import Strings from "../../../constants/Strings";
 import ChatBubble from "../../../components/ChatBubble";
@@ -50,7 +49,6 @@ interface DisplayMessage {
 export default function ExistingChatScreen() {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
-  const headerHeight = useHeaderHeight();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingHistory, setIsFetchingHistory] = useState(true);
@@ -270,8 +268,8 @@ export default function ExistingChatScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior="padding"
-      keyboardVerticalOffset={headerHeight}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Filter bar */}

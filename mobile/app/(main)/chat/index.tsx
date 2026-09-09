@@ -14,7 +14,6 @@ import {
   Platform,
   Image,
 } from "react-native";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { useRouter } from "expo-router";
 import Strings from "../../../constants/Strings";
 import ChatBubble from "../../../components/ChatBubble";
@@ -40,7 +39,6 @@ interface DisplayMessage {
 }
 
 export default function NewChatScreen() {
-  const headerHeight = useHeaderHeight();
   const router = useRouter();
   const { theme } = useTheme();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -271,8 +269,8 @@ export default function NewChatScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior="padding"
-      keyboardVerticalOffset={headerHeight}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Filter bar */}

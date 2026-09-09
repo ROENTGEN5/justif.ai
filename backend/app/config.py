@@ -18,8 +18,9 @@ class Settings:
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
 
-    # Groq (Llama 4 Scout)
+    # Groq (LLM Service)
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
     # Pinecone (Vector Database)
     PINECONE_API_KEY: str = os.getenv("PINECONE_API_KEY", "")
