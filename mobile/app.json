@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "justifai",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.justifai.app.v2"
@@ -18,7 +17,6 @@
         "backgroundColor": "#171717",
         "foregroundImage": "./assets/adaptive-icon.png"
       },
-      "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.INTERNET"
       ]

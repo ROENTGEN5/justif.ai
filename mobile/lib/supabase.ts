@@ -10,9 +10,8 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 // ─── Configuration ──────────────────────────────────────────
-// Replace these with your actual Supabase project credentials
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || "https://your-project.supabase.co";
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "your-anon-key";
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || "https://lvolxrcufdqllvpfzsxd.supabase.co";
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2b2x4cmN1ZmRxbGx2cGZ6c3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5NzQ0MTMsImV4cCI6MjA4NjU1MDQxM30.60h0UCxYOjglsgi-PO75dN1hOk7iWSAmUxBGJ8Ckc2A";
 
 // ─── Secure Storage Adapter ────────────────────────────────
 // Uses AsyncStorage on native, standard localStorage on web
