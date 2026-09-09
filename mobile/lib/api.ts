@@ -9,7 +9,7 @@ import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
 
-// ─── API URL Configuration ─────────────────────────────────
+const PRODUCTION_API_URL = "https://justif-ai.onrender.com";
 
 const DEV_API_URL = Platform.select({
   android: "http://10.0.2.2:8000",
@@ -17,8 +17,10 @@ const DEV_API_URL = Platform.select({
   default: "http://localhost:8000",
 });
 
-// Use env variable if set (for physical device testing), otherwise fall back to dev defaults
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || DEV_API_URL;
+// Use env variable if set, otherwise use production on standalone builds or dev defaults
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (__DEV__ ? DEV_API_URL : PRODUCTION_API_URL);
 
 // ─── Types ──────────────────────────────────────────────────
 
