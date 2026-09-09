@@ -153,17 +153,14 @@ async def send_message(
             "content": request.message,
         }).execute()
 
-        # Generate AI response using RAG context (or conversation history for follow-ups)
-        if context or is_followup:
-            is_initial = len(previous_messages) == 0
-            ai_response = await generate_response(
-                messages=previous_messages,
-                user_message=request.message,
-                context=context,  # empty string for follow-ups — AI uses history only
-                is_initial_query=is_initial,
-            )
-        else:
-            ai_response = "Justif.ai cannot answer this query right now."
+        # Generate AI response using RAG context (or LLM knowledge if RAG context is empty)
+        is_initial = len(previous_messages) == 0
+        ai_response = await generate_response(
+            messages=previous_messages,
+            user_message=request.message,
+            context=context,
+            is_initial_query=is_initial,
+        )
 
         # Store the AI response
         ai_res = client.table("messages").insert({
@@ -530,29 +527,25 @@ async def analyze_uploaded_file(
             f"for user={user.user_id}"
         )
 
-        if rag_service.is_ready:
-            ai_response = await analyze_file_content(
-                file_bytes=file_bytes,
-                mime_type=content_type,
-                filename=filename,
-                messages=previous_messages,
-                user_prompt=user_prompt or "",
-            )
+        ai_response = await analyze_file_content(
+            file_bytes=file_bytes,
+            mime_type=content_type,
+            filename=filename,
+            messages=previous_messages,
+            user_prompt=user_prompt or "",
+        )
 
-            # ── Determine if legal document from response ────────
-            is_legal = not any(
-                phrase in ai_response.lower()
-                for phrase in [
-                    "does not appear to be a legal document",
-                    "not a legal document",
-                    "this is not a legal",
-                    "foreign legal document",
-                    "outside philippine jurisdiction",
-                ]
-            )
-        else:
-            ai_response = "Justif.ai cannot answer this query right now."
-            is_legal = False
+        # ── Determine if legal document from response ────────
+        is_legal = not any(
+            phrase in ai_response.lower()
+            for phrase in [
+                "does not appear to be a legal document",
+                "not a legal document",
+                "this is not a legal",
+                "foreign legal document",
+                "outside philippine jurisdiction",
+            ]
+        )
 
         # ── Store the AI response ────────────────────────────
         ai_res = client.table("messages").insert({
