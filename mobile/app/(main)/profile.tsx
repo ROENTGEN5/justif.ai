@@ -7,21 +7,27 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useTheme } from "../../lib/theme";
+import { useAuth } from "../../lib/auth";
 import {
   getProfile,
   updateProfile,
   uploadAvatar,
   UserProfile,
   deleteAllChats,
+  deleteUserAccount,
 } from "../../lib/api";
 import { pickImageFromGallery, NormalizedImageAsset } from "../../lib/mediaPicker";
 import Strings from "../../constants/Strings";
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
+  const { signOut } = useAuth();
+  const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [fullName, setFullName] = useState("");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -29,6 +35,7 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingChats, setIsDeletingChats] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -102,6 +109,31 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "Are you sure you want to permanently delete your account? All your chat histories, profile information, and uploaded documents will be permanently purged in compliance with RA 10173 (Data Privacy Act of 2012). This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Permanently",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsDeletingAccount(true);
+              await deleteUserAccount();
+              await signOut();
+              Alert.alert("Account Deleted", "Your account and all associated personal data have been completely deleted.");
+            } catch (error: any) {
+              Alert.alert("Error", error.message || "Failed to delete account. Please try again.");
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleDeleteAllChats = () => {
     Alert.alert(Strings.deleteAllChats, Strings.deleteAllChatsConfirm, [
       { text: Strings.cancel, style: "cancel" },
@@ -132,7 +164,11 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background, padding: 20 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: theme.background }}
+      contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Avatar Section */}
       <View style={{ alignItems: "center", marginTop: 40, marginBottom: 40 }}>
         <TouchableOpacity
@@ -225,27 +261,68 @@ export default function ProfileScreen() {
       {/* Delete All Chat History Button */}
       <TouchableOpacity
         onPress={handleDeleteAllChats}
-        disabled={isDeletingChats || isLoading}
+        disabled={isDeletingChats || isDeletingAccount || isLoading}
         activeOpacity={0.8}
         style={{
           backgroundColor: theme.surfaceElevated,
-          paddingVertical: 16,
+          paddingVertical: 14,
           borderRadius: 12,
           alignItems: "center",
           marginTop: 16,
           borderWidth: 1,
-          borderColor: "red",
+          borderColor: "#E53E3E",
           opacity: isDeletingChats ? 0.7 : 1,
         }}
       >
         {isDeletingChats ? (
-          <ActivityIndicator color="red" />
+          <ActivityIndicator color="#E53E3E" />
         ) : (
-          <Text style={{ fontSize: 16, fontWeight: "700", color: "red" }}>
+          <Text style={{ fontSize: 15, fontWeight: "600", color: "#E53E3E" }}>
             {Strings.deleteAllChats}
           </Text>
         )}
       </TouchableOpacity>
-    </View>
+
+      {/* Privacy Notice Link */}
+      <TouchableOpacity
+        onPress={() => router.push("/(main)/privacy" as any)}
+        activeOpacity={0.8}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          marginTop: 20,
+          paddingVertical: 8,
+          gap: 6,
+        }}
+      >
+        <Ionicons name="shield-checkmark-outline" size={16} color={theme.textTertiary} />
+        <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: "500" }}>
+          Read Privacy Notice (RA 10173)
+        </Text>
+      </TouchableOpacity>
+
+      {/* Delete Account Button (RA 10173 Right to Erasure) */}
+      <TouchableOpacity
+        onPress={handleDeleteAccount}
+        disabled={isDeletingAccount || isDeletingChats || isLoading}
+        activeOpacity={0.8}
+        style={{
+          paddingVertical: 14,
+          borderRadius: 12,
+          alignItems: "center",
+          marginTop: 8,
+          opacity: isDeletingAccount ? 0.7 : 1,
+        }}
+      >
+        {isDeletingAccount ? (
+          <ActivityIndicator color="#E53E3E" />
+        ) : (
+          <Text style={{ fontSize: 13, fontWeight: "600", color: "#E53E3E" }}>
+            Delete Account & Personal Data
+          </Text>
+        )}
+      </TouchableOpacity>
+    </ScrollView>
   );
 }

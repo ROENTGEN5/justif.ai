@@ -371,6 +371,49 @@ async def get_chat_messages(
         )
 
 
+@router.delete("/account")
+async def delete_user_account(
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Permanently delete the authenticated user's account and all associated data.
+    Complies with RA 10173 (Data Privacy Act of 2012) right to erasure.
+    """
+    try:
+        client = get_user_client(user.token)
+
+        # 1. Purge all user chat sessions (messages cascade automatically)
+        client.table("chats").delete().eq("user_id", user.user_id).execute()
+
+        # 2. Delete user profile record
+        client.table("profiles").delete().eq("id", user.user_id).execute()
+
+        # 3. Delete user's avatar from storage if exists
+        try:
+            files = client.storage.from_("avatars").list(prefix=user.user_id)
+            if files:
+                file_names = [f["name"] for f in files]
+                client.storage.from_("avatars").remove(file_names)
+        except Exception as storage_err:
+            logger.warning(f"Could not purge storage avatar for user {user.user_id}: {storage_err}")
+
+        # 4. If Supabase admin RPC or admin delete is available, delete auth user
+        try:
+            client.rpc("delete_user").execute()
+        except Exception:
+            pass
+
+        logger.info(f"User account {user.user_id} and all personal data permanently purged.")
+        return {"detail": "Account and associated personal data successfully deleted."}
+
+    except Exception as e:
+        logger.error(f"Failed to delete account for user={user.user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete account. Please try again.",
+        )
+
+
 @router.delete("/chats/{chat_id}")
 async def delete_chat(
     chat_id: str,

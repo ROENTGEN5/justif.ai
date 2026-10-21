@@ -50,6 +50,20 @@ export default function MainLayout() {
           ),
         }}
       />
+      <Drawer.Screen
+        name="privacy"
+        options={{
+          drawerItemStyle: { display: "none" },
+          headerShown: false,
+        }}
+      />
+      <Drawer.Screen
+        name="profile"
+        options={{
+          drawerItemStyle: { display: "none" },
+          title: "Profile Settings",
+        }}
+      />
     </Drawer>
   );
 }

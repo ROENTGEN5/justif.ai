@@ -176,6 +176,24 @@ export async function createChat(title?: string): Promise<Chat> {
 }
 
 /**
+ * Permanently delete the user's account and all associated data.
+ * Complies with RA 10173 (Data Privacy Act of 2012) right to erasure.
+ */
+export async function deleteUserAccount(): Promise<void> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/account`, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to delete account.");
+  }
+}
+
+/**
  * Delete a chat and all its messages.
  */
 export async function deleteChat(chatId: string): Promise<void> {

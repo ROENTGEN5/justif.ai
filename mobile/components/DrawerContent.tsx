@@ -487,6 +487,40 @@ export default function DrawerContent(props: any) {
           paddingHorizontal: 20,
         }}
       >
+        {/* Privacy Notice Link */}
+        <TouchableOpacity
+          onPress={() => {
+            router.push("/(main)/privacy" as any);
+            props.navigation.closeDrawer();
+          }}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 10,
+            paddingHorizontal: 12,
+            borderRadius: 10,
+            backgroundColor: theme.surfaceElevated,
+            borderWidth: 1,
+            borderColor: theme.border,
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <Ionicons name="shield-checkmark-outline" size={18} color={theme.textSecondary} />
+          <Text
+            style={{
+              flex: 1,
+              fontSize: 13,
+              fontWeight: "500",
+              color: theme.textSecondary,
+            }}
+          >
+            Privacy Notice (RA 10173)
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
+        </TouchableOpacity>
+
         {/* User info */}
         <TouchableOpacity
           onPress={() => {
