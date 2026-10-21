@@ -16,17 +16,35 @@ import { Alert } from "react-native";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import Strings from "../constants/Strings";
-// import {
-//   GoogleSignin,
-//   statusCodes,
-// } from "@react-native-google-signin/google-signin";
+import {
+  GoogleSignin,
+  statusCodes,
+  isErrorWithCode,
+  isSuccessResponse,
+} from "@react-native-google-signin/google-signin";
 
 // ─── Configure Google Sign-In ───────────────────────────────
 
-// GoogleSignin.configure({
-//   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
-//   offlineAccess: true,
-// });
+const getWebClientId = () => {
+  const clientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+  if (!clientId || clientId === "YOUR_GOOGLE_WEB_CLIENT_ID_HERE") {
+    return null;
+  }
+  return clientId;
+};
+
+// Initial configuration if client ID is set
+const initialClientId = getWebClientId();
+if (initialClientId) {
+  try {
+    GoogleSignin.configure({
+      webClientId: initialClientId,
+      offlineAccess: true,
+    });
+  } catch (e) {
+    console.warn("[AuthProvider] Failed to configure GoogleSignin at startup:", e);
+  }
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -178,11 +196,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign in with Google (native)
   const signInWithGoogle = useCallback(async () => {
-    Alert.alert(
-      "Not Available in Expo Go",
-      "Google Sign-In requires native modules that are not included in Expo Go. Please use a development build to test this feature, or use Email/Password sign in for now."
-    );
-    return;
+    try {
+      const webClientId = getWebClientId();
+      if (!webClientId) {
+        throw new Error(
+          "Google Web Client ID is not configured. Please set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in your mobile/.env file."
+        );
+      }
+
+      // Ensure GoogleSignin is configured with the web client ID
+      GoogleSignin.configure({
+        webClientId,
+        offlineAccess: true,
+      });
+
+      // Check if Google Play Services are available
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Trigger native Google Sign-In prompt
+      const response = await GoogleSignin.signIn();
+
+      if (!isSuccessResponse(response)) {
+        // User cancelled or dismissed sign-in
+        return;
+      }
+
+      const idToken = response.data.idToken;
+      if (!idToken) {
+        throw new Error("No ID token received from Google.");
+      }
+
+      // Sign in to Supabase using the Google ID token
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: "google",
+        token: idToken,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    } catch (error: any) {
+      if (isErrorWithCode(error)) {
+        if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+          // User cancelled — silently return
+          return;
+        } else if (error.code === statusCodes.IN_PROGRESS) {
+          // Sign-in already in progress
+          return;
+        } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+          throw new Error(
+            "Google Play Services is not available or outdated on this device."
+          );
+        }
+      }
+
+      // Fallback message if native module is missing (e.g. running in Expo Go)
+      if (
+        error?.message?.includes("TurboModuleRegistry") ||
+        error?.message?.includes("RNGoogleSignin")
+      ) {
+        throw new Error(
+          "Google Sign-In native module not found. Please run this app using an Expo Development Build, not Expo Go."
+        );
+      }
+
+      throw error;
+    }
   }, []);
 
   // Sign out
@@ -194,14 +273,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         style: "destructive",
         onPress: async () => {
           // Also sign out of Google if signed in
-          // try {
-          //   const isSignedIn = GoogleSignin.getCurrentUser();
-          //   if (isSignedIn) {
-          //     await GoogleSignin.signOut();
-          //   }
-          // } catch (e) {
-          //   // Ignore Google sign-out errors
-          // }
+          try {
+            const currentUser = GoogleSignin.getCurrentUser();
+            if (currentUser) {
+              await GoogleSignin.signOut();
+            }
+          } catch (e) {
+            // Ignore Google sign-out errors (e.g. user was not logged into Google)
+          }
 
           const { error } = await supabase.auth.signOut();
           if (error) {

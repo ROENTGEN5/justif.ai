@@ -18,7 +18,10 @@
         "foregroundImage": "./assets/adaptive-icon.png"
       },
       "permissions": [
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -26,7 +29,15 @@
       "favicon": "./assets/icon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Justif.ai to access your photos to analyze legal documents.",
+          "cameraPermission": "Allow Justif.ai to take photos of legal documents."
+        }
+      ],
       [
         "expo-splash-screen",
         {

@@ -85,7 +85,7 @@ app = FastAPI(
     description=(
         "Justif.ai — Ang iyong munting Abogado. "
         "A Filipino legal AI assistant powered by RAG over 13,953 Philippine laws "
-        "and Groq Llama 4 Scout."
+        "and DeepSeek."
     ),
     version="1.0.0",
     docs_url="/docs" if settings.DEBUG else None,

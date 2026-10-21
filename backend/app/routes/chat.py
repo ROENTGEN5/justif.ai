@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from app.middleware.auth import get_current_user, AuthenticatedUser
 from app.services.supabase_client import get_user_client
-from app.services.gemini import generate_response, analyze_file_content, transform_query_for_rag, generate_chat_title
+from app.services.deepseek import generate_response, analyze_file_content, transform_query_for_rag, generate_chat_title
 from app.services.rag import rag_service, LAW_TYPES
 from app.models.schemas import (
     ChatMessageRequest,
@@ -521,7 +521,7 @@ async def analyze_uploaded_file(
             "content": user_content,
         }).execute()
 
-        # ── Analyze file with Gemini ─────────────────────────
+        # ── Analyze file with DeepSeek ─────────────────────────
         logger.info(
             f"Analyzing file '{filename}' ({content_type}, {len(file_bytes)} bytes) "
             f"for user={user.user_id}"
