@@ -9,10 +9,15 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.justifai.app.v2"
+      "bundleIdentifier": "com.justifai.app.v2",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Justif.ai to use your camera to take photos of legal documents.",
+        "NSPhotoLibraryUsageDescription": "Allow Justif.ai to access your photo library to upload legal documents and profile pictures."
+      }
     },
     "android": {
       "package": "com.justifai.app.v2",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#171717",
         "foregroundImage": "./assets/adaptive-icon.png"
@@ -20,6 +25,7 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]

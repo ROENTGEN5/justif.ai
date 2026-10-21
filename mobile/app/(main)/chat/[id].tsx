@@ -15,6 +15,7 @@ import {
   Modal,
   TouchableOpacity,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from "react-native";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
@@ -68,6 +69,23 @@ export default function ExistingChatScreen() {
   useEffect(() => {
     getLawTypes().then(setLawTypes).catch(() => {});
   }, []);
+
+  const scrollToBottom = useCallback(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages.length]);
+
+  // Auto-scroll when the keyboard opens
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const sub = Keyboard.addListener(showEvent, () => {
+      scrollToBottom();
+    });
+    return () => sub.remove();
+  }, [scrollToBottom]);
 
   // Fetch existing messages on mount
   useEffect(() => {
@@ -152,7 +170,7 @@ export default function ExistingChatScreen() {
         setIsLoading(false);
       }
     },
-    [chatId, selectedTypes]
+    [chatId, selectedTypes, sessionQueries]
   );
 
   const handleFileSelected = useCallback(
@@ -196,16 +214,8 @@ export default function ExistingChatScreen() {
         setIsLoading(false);
       }
     },
-    [chatId]
+    [chatId, sessionQueries]
   );
-
-  const scrollToBottom = useCallback(() => {
-    if (flatListRef.current && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [messages.length]);
 
   const handleRate = useCallback(async (id: string, rating: "like" | "unlike") => {
     try {
@@ -213,7 +223,7 @@ export default function ExistingChatScreen() {
       setMessages((prev) => prev.map((m) => m.id === id ? { ...m, rating } : m));
       await rateMessage(id, rating);
       if (showReviewModal) setShowReviewModal(false);
-      
+
       // Show custom thank you toast
       setShowThankYou(true);
       setTimeout(() => setShowThankYou(false), 2500);
@@ -238,7 +248,7 @@ export default function ExistingChatScreen() {
         <SourceCard sources={item.sources} />
       )}
     </View>
-  ), []);
+  ), [handleRate]);
 
   // Loading state while fetching history
   if (isFetchingHistory) {
@@ -267,131 +277,134 @@ export default function ExistingChatScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      style={{ flex: 1, backgroundColor: theme.background }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 80}
     >
       <View style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Filter bar */}
-      {lawTypes.length > 0 && (
-        <FilterChips
-          lawTypes={lawTypes}
-          selectedTypes={selectedTypes}
-          onToggle={handleToggleFilter}
-          onClear={handleClearFilters}
-        />
-      )}
+        {lawTypes.length > 0 && (
+          <FilterChips
+            lawTypes={lawTypes}
+            selectedTypes={selectedTypes}
+            onToggle={handleToggleFilter}
+            onClear={handleClearFilters}
+          />
+        )}
 
-      {/* Messages list */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{
-          paddingTop: 16,
-          paddingBottom: 150,
-          flexGrow: messages.length === 0 ? 1 : undefined,
-        }}
-        onContentSizeChange={scrollToBottom}
-        showsVerticalScrollIndicator={false}
-        ListFooterComponent={isLoading ? <LoadingDots /> : null}
-        ListEmptyComponent={
-          <View
-            style={{
-              flex: 1,
-              justifyContent: "center",
-              alignItems: "center",
-              paddingHorizontal: 32,
-            }}
-          >
-            <Text
+        {/* Messages list */}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={{
+            paddingTop: 16,
+            paddingBottom: 24,
+            flexGrow: messages.length === 0 ? 1 : undefined,
+          }}
+          onContentSizeChange={scrollToBottom}
+          onLayout={scrollToBottom}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}
+          ListFooterComponent={isLoading ? <LoadingDots /> : null}
+          ListEmptyComponent={
+            <View
               style={{
-                fontSize: 15,
-                color: theme.textTertiary,
-                textAlign: "center",
+                flex: 1,
+                justifyContent: "center",
+                alignItems: "center",
+                paddingHorizontal: 32,
               }}
             >
-              {Strings.chatWelcome}
-            </Text>
-          </View>
-        }
-      />
-
-      {/* Input bar */}
-      <ChatInput
-        onSend={handleSend}
-        onFileSelected={handleFileSelected}
-        isLoading={isLoading}
-      />
-
-      {/* Review Modal */}
-      <Modal visible={showReviewModal} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-          <View style={{ backgroundColor: theme.surfaceElevated, padding: 24, borderRadius: 16, width: "100%", maxWidth: 320, alignItems: "center" }}>
-            <Ionicons name="star" size={40} color={theme.accent} style={{ marginBottom: 12 }} />
-            <Text style={{ fontSize: 18, fontWeight: "700", color: theme.text, marginBottom: 8, textAlign: "center" }}>
-              How did we do?
-            </Text>
-            <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", marginBottom: 24 }}>
-              Help us improve! Was the last answer accurate and helpful?
-            </Text>
-            
-            <View style={{ flexDirection: "row", gap: 16, marginBottom: 16, width: "100%" }}>
-              <TouchableOpacity
-                onPress={() => reviewMessageId && handleRate(reviewMessageId, "like")}
-                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 8, backgroundColor: theme.surfaceHover, borderWidth: 1, borderColor: theme.border, gap: 8 }}
+              <Text
+                style={{
+                  fontSize: 15,
+                  color: theme.textTertiary,
+                  textAlign: "center",
+                }}
               >
-                <Ionicons name="thumbs-up-outline" size={18} color={theme.text} />
-                <Text style={{ color: theme.text, fontWeight: "600" }}>Good</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => reviewMessageId && handleRate(reviewMessageId, "unlike")}
-                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 8, backgroundColor: theme.surfaceHover, borderWidth: 1, borderColor: theme.border, gap: 8 }}
-              >
-                <Ionicons name="thumbs-down-outline" size={18} color={theme.text} />
-                <Text style={{ color: theme.text, fontWeight: "600" }}>Bad</Text>
+                {Strings.chatWelcome}
+              </Text>
+            </View>
+          }
+        />
+
+        {/* Input bar */}
+        <ChatInput
+          onSend={handleSend}
+          onFileSelected={handleFileSelected}
+          onFocus={scrollToBottom}
+          isLoading={isLoading}
+        />
+
+        {/* Review Modal */}
+        <Modal visible={showReviewModal} transparent animationType="fade">
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: theme.surfaceElevated, padding: 24, borderRadius: 16, width: "100%", maxWidth: 320, alignItems: "center" }}>
+              <Ionicons name="star" size={40} color={theme.accent} style={{ marginBottom: 12 }} />
+              <Text style={{ fontSize: 18, fontWeight: "700", color: theme.text, marginBottom: 8, textAlign: "center" }}>
+                How did we do?
+              </Text>
+              <Text style={{ fontSize: 14, color: theme.textTertiary, textAlign: "center", marginBottom: 24 }}>
+                Help us improve! Was the last answer accurate and helpful?
+              </Text>
+
+              <View style={{ flexDirection: "row", gap: 16, marginBottom: 16, width: "100%" }}>
+                <TouchableOpacity
+                  onPress={() => reviewMessageId && handleRate(reviewMessageId, "like")}
+                  style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 8, backgroundColor: theme.surfaceHover, borderWidth: 1, borderColor: theme.border, gap: 8 }}
+                >
+                  <Ionicons name="thumbs-up-outline" size={18} color={theme.text} />
+                  <Text style={{ color: theme.text, fontWeight: "600" }}>Good</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => reviewMessageId && handleRate(reviewMessageId, "unlike")}
+                  style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 8, backgroundColor: theme.surfaceHover, borderWidth: 1, borderColor: theme.border, gap: 8 }}
+                >
+                  <Ionicons name="thumbs-down-outline" size={18} color={theme.text} />
+                  <Text style={{ color: theme.text, fontWeight: "600" }}>Bad</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity onPress={() => setShowReviewModal(false)} style={{ padding: 8 }}>
+                <Text style={{ color: theme.textTertiary, fontSize: 14 }}>Skip for now</Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity onPress={() => setShowReviewModal(false)} style={{ padding: 8 }}>
-              <Text style={{ color: theme.textTertiary, fontSize: 14 }}>Skip for now</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      {/* ─── Custom Thank You Toast ────────────────────────── */}
-      {showThankYou && (
-        <Animated.View
-          entering={FadeInDown.duration(300)}
-          exiting={FadeOutDown.duration(300)}
-          style={{
-            position: "absolute",
-            bottom: Platform.OS === "ios" ? 110 : 90,
-            alignSelf: "center",
-            backgroundColor: theme.accent,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            borderRadius: 20,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.15,
-            shadowRadius: 4,
-            elevation: 4,
-            zIndex: 100,
-          }}
-        >
-          <Ionicons name="checkmark-circle" size={16} color={theme.accentText} />
-          <Text style={{ color: theme.accentText, fontSize: 13, fontWeight: "600" }}>
-            Thank you for your feedback!
-          </Text>
-        </Animated.View>
-      )}
-
+        {/* ─── Custom Thank You Toast ────────────────────────── */}
+        {showThankYou && (
+          <Animated.View
+            entering={FadeInDown.duration(300)}
+            exiting={FadeOutDown.duration(300)}
+            style={{
+              position: "absolute",
+              bottom: Platform.OS === "ios" ? 110 : 90,
+              alignSelf: "center",
+              backgroundColor: theme.accent,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 20,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.15,
+              shadowRadius: 4,
+              elevation: 4,
+              zIndex: 100,
+            }}
+          >
+            <Ionicons name="checkmark-circle" size={16} color={theme.accentText} />
+            <Text style={{ color: theme.accentText, fontSize: 13, fontWeight: "600" }}>
+              Thank you for your feedback!
+            </Text>
+          </Animated.View>
+        )}
       </View>
     </KeyboardAvoidingView>
   );

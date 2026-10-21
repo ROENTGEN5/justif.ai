@@ -184,6 +184,10 @@ async def send_message(
         )
         title = chat_data.data[0]["title"] if chat_data.data else "Bagong Usapan"
 
+        # Clear RAG sources if the AI refused a non-legal query
+        if "legal queries only" in ai_response.lower() or "only handle queries, documents, and images related to law" in ai_response.lower():
+            sources = []
+
         return ChatMessageResponse(
             chat_id=chat_id,
             message_id=message_id,
@@ -540,6 +544,8 @@ async def analyze_uploaded_file(
             phrase in ai_response.lower()
             for phrase in [
                 "does not appear to be a legal document",
+                "does not appear to be related to law",
+                "legal materials only",
                 "not a legal document",
                 "this is not a legal",
                 "foreign legal document",

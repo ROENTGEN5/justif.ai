@@ -5,29 +5,32 @@
  * Theme-aware minimalist design.
  */
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Modal,
-  TouchableWithoutFeedback,
   Platform,
   Alert,
+  Keyboard,
+  StyleSheet,
 } from "react-native";
-import Animated, { Layout } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Strings from "../constants/Strings";
 import { useTheme } from "../lib/theme";
 import type { FileAttachment } from "../lib/api";
+import { pickImageFromCamera, pickImageFromGallery } from "../lib/mediaPicker";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   onFileSelected: (file: FileAttachment) => void;
+  onFocus?: () => void;
   isLoading?: boolean;
   disabled?: boolean;
 }
@@ -43,14 +46,30 @@ const ALLOWED_TYPES = [...ALLOWED_IMAGE_TYPES, ...ALLOWED_DOC_TYPES];
 export default function ChatInput({
   onSend,
   onFileSelected,
+  onFocus,
   isLoading = false,
   disabled = false,
 }: ChatInputProps) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [message, setMessage] = useState("");
   const [attachment, setAttachment] = useState<FileAttachment | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSub = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const handleSend = () => {
     // If there's an attachment, send it
@@ -74,13 +93,11 @@ export default function ChatInput({
   // ─── File Picking Logic ─────────────────────────────────
 
   const validateAndSetFile = (uri: string, name: string, mimeType: string, size?: number) => {
-    // Validate MIME type
     if (!ALLOWED_TYPES.includes(mimeType)) {
       Alert.alert("Unsupported File", Strings.unsupportedFile);
       return;
     }
 
-    // Validate file size if available
     if (size && size > MAX_FILE_SIZE) {
       Alert.alert("File Too Large", Strings.fileTooLarge);
       return;
@@ -90,50 +107,49 @@ export default function ChatInput({
   };
 
   const handleTakePhoto = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        "Permission Required",
-        "Camera access is needed to take photos.",
+    try {
+      const normalized = await pickImageFromCamera({
+        maxDimension: 1024,
+        quality: 0.8,
+      });
+
+      if (!normalized) {
+        return;
+      }
+
+      validateAndSetFile(
+        normalized.uri,
+        normalized.name,
+        normalized.mimeType,
+        normalized.size,
       );
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      allowsEditing: false,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      const name = asset.fileName || `photo_${Date.now()}.jpg`;
-      const mimeType = asset.mimeType || "image/jpeg";
-      validateAndSetFile(asset.uri, name, mimeType, asset.fileSize);
+    } catch (error: any) {
+      console.warn("Error taking photo:", error);
+      Alert.alert("Camera Error", error?.message || "Could not capture photo.");
     }
   };
 
   const handleChooseFromGallery = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        "Permission Required",
-        "Gallery access is needed to choose photos.",
+    try {
+      const normalized = await pickImageFromGallery({
+        allowsEditing: false,
+        maxDimension: 1024,
+        quality: 0.8,
+      });
+
+      if (!normalized) {
+        return;
+      }
+
+      validateAndSetFile(
+        normalized.uri,
+        normalized.name,
+        normalized.mimeType,
+        normalized.size,
       );
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      allowsEditing: false,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      const name = asset.fileName || `image_${Date.now()}.jpg`;
-      const mimeType = asset.mimeType || "image/jpeg";
-      validateAndSetFile(asset.uri, name, mimeType, asset.fileSize);
+    } catch (error: any) {
+      console.warn("Error choosing image from gallery:", error);
+      Alert.alert("Gallery Error", error?.message || "Could not select image from gallery.");
     }
   };
 
@@ -144,7 +160,7 @@ export default function ChatInput({
         copyToCacheDirectory: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
+      if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
         validateAndSetFile(
           asset.uri,
@@ -159,6 +175,7 @@ export default function ChatInput({
   };
 
   const showAttachmentOptions = () => {
+    Keyboard.dismiss();
     setShowAttachMenu(true);
   };
 
@@ -167,13 +184,17 @@ export default function ChatInput({
   };
 
   const handleAttachOption = (option: "camera" | "gallery" | "document") => {
-    closeAttachMenu();
-    // small delay to allow modal to close smoothly before opening native pickers
+    setShowAttachMenu(false);
+    // Allow modal dismissal to complete before launching native activity
     setTimeout(() => {
-      if (option === "camera") handleTakePhoto();
-      else if (option === "gallery") handleChooseFromGallery();
-      else if (option === "document") handleChooseDocument();
-    }, 300);
+      if (option === "camera") {
+        void handleTakePhoto();
+      } else if (option === "gallery") {
+        void handleChooseFromGallery();
+      } else if (option === "document") {
+        void handleChooseDocument();
+      }
+    }, 250);
   };
 
   const removeAttachment = () => {
@@ -199,8 +220,12 @@ export default function ChatInput({
     return name.slice(0, maxLen - 3) + "...";
   };
 
+  const bottomSafePadding = isKeyboardVisible
+    ? 6
+    : Math.max(insets.bottom, Platform.OS === "ios" ? 20 : 10);
+
   return (
-    <View>
+    <View style={{ backgroundColor: theme.background }}>
       {/* ─── Attachment Preview ──────────────────────────── */}
       {attachment && (
         <View
@@ -277,7 +302,6 @@ export default function ChatInput({
           alignItems: "flex-end",
           paddingHorizontal: 12,
           paddingVertical: 8,
-          paddingBottom: 8,
           backgroundColor: theme.background,
           borderTopWidth: attachment ? 0 : 1,
           borderTopColor: theme.border,
@@ -329,6 +353,7 @@ export default function ChatInput({
             ref={inputRef}
             value={message}
             onChangeText={setMessage}
+            onFocus={onFocus}
             placeholder={
               attachment
                 ? "Add a message (optional)..."
@@ -379,77 +404,169 @@ export default function ChatInput({
       </View>
 
       {/* ─── Disclaimer Text ────────────────────────────── */}
-      <View style={{ 
-        backgroundColor: theme.background, 
-        paddingBottom: Platform.OS === "ios" ? 28 : 12,
-        paddingHorizontal: 16,
-        paddingTop: 2,
-        alignItems: "center"
-      }}>
-        <Text style={{ 
-          fontSize: 10, 
-          color: theme.textTertiary, 
-          textAlign: "center",
-          lineHeight: 14 
-        }}>
+      <View
+        style={{
+          backgroundColor: theme.background,
+          paddingBottom: bottomSafePadding,
+          paddingHorizontal: 16,
+          paddingTop: 2,
+          alignItems: "center",
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 10,
+            color: theme.textTertiary,
+            textAlign: "center",
+            lineHeight: 14,
+          }}
+        >
           Justif.ai is an AI and can make mistakes. Legal terms here are for educational purposes only.
         </Text>
       </View>
 
       {/* ─── Custom Attach Menu Modal ──────────────────────── */}
-      <Modal visible={showAttachMenu} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={closeAttachMenu}>
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-            <TouchableWithoutFeedback>
-              <View style={{
-                backgroundColor: theme.surfaceElevated,
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-                padding: 24,
-                paddingBottom: Platform.OS === "ios" ? 40 : 24,
-              }}>
-                <View style={{ width: 40, height: 4, backgroundColor: theme.border, borderRadius: 2, alignSelf: "center", marginBottom: 24 }} />
-                
-                <Text style={{ fontSize: 18, fontWeight: "700", color: theme.text, marginBottom: 20 }}>
-                  {Strings.attachFile}
-                </Text>
+      <Modal
+        visible={showAttachMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAttachMenu}
+      >
+        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+          <Pressable
+            onPress={closeAttachMenu}
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: "rgba(0,0,0,0.5)" },
+            ]}
+          />
+          <View
+            style={{
+              backgroundColor: theme.surfaceElevated,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              padding: 24,
+              paddingBottom: Math.max(insets.bottom + 16, Platform.OS === "ios" ? 40 : 24),
+            }}
+          >
+            <View
+              style={{
+                width: 40,
+                height: 4,
+                backgroundColor: theme.border,
+                borderRadius: 2,
+                alignSelf: "center",
+                marginBottom: 24,
+              }}
+            />
 
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }}>
-                  <TouchableOpacity
-                    onPress={() => handleAttachOption("camera")}
-                    style={{ alignItems: "center", flex: 1 }}
-                  >
-                    <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: theme.accent + "20", justifyContent: "center", alignItems: "center", marginBottom: 8 }}>
-                      <Ionicons name="camera" size={28} color={theme.accent} />
-                    </View>
-                    <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: "500" }}>Camera</Text>
-                  </TouchableOpacity>
+            <Text
+              style={{
+                fontSize: 18,
+                fontWeight: "700",
+                color: theme.text,
+                marginBottom: 20,
+              }}
+            >
+              {Strings.attachFile}
+            </Text>
 
-                  <TouchableOpacity
-                    onPress={() => handleAttachOption("gallery")}
-                    style={{ alignItems: "center", flex: 1 }}
-                  >
-                    <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: theme.accent + "20", justifyContent: "center", alignItems: "center", marginBottom: 8 }}>
-                      <Ionicons name="images" size={28} color={theme.accent} />
-                    </View>
-                    <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: "500" }}>Gallery</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => handleAttachOption("document")}
-                    style={{ alignItems: "center", flex: 1 }}
-                  >
-                    <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: theme.accent + "20", justifyContent: "center", alignItems: "center", marginBottom: 8 }}>
-                      <Ionicons name="document-text" size={28} color={theme.accent} />
-                    </View>
-                    <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: "500" }}>Document</Text>
-                  </TouchableOpacity>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginBottom: 10,
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => handleAttachOption("camera")}
+                activeOpacity={0.7}
+                style={{ alignItems: "center", flex: 1 }}
+              >
+                <View
+                  style={{
+                    width: 60,
+                    height: 60,
+                    borderRadius: 30,
+                    backgroundColor: theme.accent + "20",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <Ionicons name="camera" size={28} color={theme.accent} />
                 </View>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: theme.textSecondary,
+                    fontWeight: "500",
+                  }}
+                >
+                  Camera
+                </Text>
+              </TouchableOpacity>
 
-              </View>
-            </TouchableWithoutFeedback>
+              <TouchableOpacity
+                onPress={() => handleAttachOption("gallery")}
+                activeOpacity={0.7}
+                style={{ alignItems: "center", flex: 1 }}
+              >
+                <View
+                  style={{
+                    width: 60,
+                    height: 60,
+                    borderRadius: 30,
+                    backgroundColor: theme.accent + "20",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <Ionicons name="images" size={28} color={theme.accent} />
+                </View>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: theme.textSecondary,
+                    fontWeight: "500",
+                  }}
+                >
+                  Gallery
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => handleAttachOption("document")}
+                activeOpacity={0.7}
+                style={{ alignItems: "center", flex: 1 }}
+              >
+                <View
+                  style={{
+                    width: 60,
+                    height: 60,
+                    borderRadius: 30,
+                    backgroundColor: theme.accent + "20",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <Ionicons name="document-text" size={28} color={theme.accent} />
+                </View>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: theme.textSecondary,
+                    fontWeight: "500",
+                  }}
+                >
+                  Document
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
     </View>
   );

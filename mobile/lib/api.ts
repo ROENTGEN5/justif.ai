@@ -274,7 +274,6 @@ export async function analyzeFile(
     throw new Error("You are not signed in. Please sign in again.");
   }
 
-  // Use Expo FileSystem upload for better reliability on physical devices
   const uploadUrl = `${API_BASE_URL}/api/chat/analyze-file`;
 
   const parameters: Record<string, string> = {};
@@ -282,9 +281,20 @@ export async function analyzeFile(
   if (userPrompt) parameters.user_prompt = userPrompt;
 
   try {
-    const response = await FileSystem.uploadAsync(uploadUrl, file.uri, {
-      fieldName: 'file',
-      httpMethod: 'POST',
+    // Normalize content:// URI if needed before uploading
+    let workingUri = file.uri;
+    const cacheDir = FileSystem.cacheDirectory || "";
+    if (!workingUri.startsWith("file://") && cacheDir) {
+      const ext = file.mimeType === "application/pdf" ? "pdf" : "jpg";
+      const tempPath = `${cacheDir}upload_${Date.now()}.${ext}`;
+      await FileSystem.copyAsync({ from: workingUri, to: tempPath });
+      workingUri = tempPath;
+    }
+
+    const response = await FileSystem.uploadAsync(uploadUrl, workingUri, {
+      fieldName: "file",
+      mimeType: file.mimeType,
+      httpMethod: "POST",
       uploadType: (FileSystem.FileSystemUploadType?.MULTIPART ?? 1) as any,
       parameters,
       headers: {
@@ -298,7 +308,7 @@ export async function analyzeFile(
       try {
         const errorBody = JSON.parse(response.body);
         errorMsg = errorBody.detail || errorMsg;
-      } catch (e) { }
+      } catch (e) {}
       throw new Error(errorMsg);
     }
 
@@ -367,22 +377,37 @@ export async function updateProfile(fullName: string, avatarUrl: string | null):
   }
 }
 
-export async function uploadAvatar(uri: string): Promise<string> {
+export async function uploadAvatar(uri: string, preloadedBase64?: string): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) throw new Error("No user session");
 
-  const ext = uri.split('.').pop() || 'jpg';
-  const fileName = `${session.user.id}-${Date.now()}.${ext}`;
+  let workingUri = uri;
+  const cacheDir = FileSystem.cacheDirectory || "";
 
-  // Read the file as base64 using expo-file-system
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  // Normalize content:// or non-file:// URIs into cache directory
+  if (!workingUri.startsWith("file://") && cacheDir && !preloadedBase64) {
+    const tempPath = `${cacheDir}avatar_${Date.now()}.jpg`;
+    await FileSystem.copyAsync({ from: workingUri, to: tempPath });
+    workingUri = tempPath;
+  }
+
+  let base64 = preloadedBase64;
+  if (!base64) {
+    const fileInfo = await FileSystem.getInfoAsync(workingUri);
+    if (!fileInfo.exists) {
+      throw new Error("Selected image file could not be accessed on device storage.");
+    }
+    base64 = await FileSystem.readAsStringAsync(workingUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
+
+  const fileName = `${session.user.id}-${Date.now()}.jpg`;
 
   const { data, error } = await supabase.storage
-    .from('avatars')
+    .from("avatars")
     .upload(fileName, decode(base64), {
-      contentType: `image/${ext}`,
+      contentType: "image/jpeg",
       upsert: true,
     });
 
@@ -396,7 +421,7 @@ export async function uploadAvatar(uri: string): Promise<string> {
 
   // Get public URL
   const { data: publicUrlData } = supabase.storage
-    .from('avatars')
+    .from("avatars")
     .getPublicUrl(data.path);
 
   return publicUrlData.publicUrl;

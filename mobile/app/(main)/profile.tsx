@@ -8,7 +8,6 @@ import {
   Alert,
   Image,
 } from "react-native";
-import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../lib/theme";
 import {
@@ -18,6 +17,7 @@ import {
   UserProfile,
   deleteAllChats,
 } from "../../lib/api";
+import { pickImageFromGallery, NormalizedImageAsset } from "../../lib/mediaPicker";
 import Strings from "../../constants/Strings";
 
 export default function ProfileScreen() {
@@ -25,6 +25,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [fullName, setFullName] = useState("");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [pickedAvatarAsset, setPickedAvatarAsset] = useState<NormalizedImageAsset | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingChats, setIsDeletingChats] = useState(false);
@@ -40,24 +41,33 @@ export default function ProfileScreen() {
       setProfile(p);
       setFullName(p.full_name || "");
       setAvatarUri(p.avatar_url || null);
+      setPickedAvatarAsset(null);
     }
     setIsLoading(false);
   };
 
   const handlePickImage = async () => {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+      const normalized = await pickImageFromGallery({
         allowsEditing: true,
         aspect: [1, 1],
+        maxDimension: 1024,
         quality: 0.8,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setAvatarUri(result.assets[0].uri);
+      // User cancellation returns null — handle silently without throwing an error
+      if (!normalized) {
+        return;
       }
+
+      setPickedAvatarAsset(normalized);
+      setAvatarUri(normalized.uri);
     } catch (e: any) {
-      Alert.alert("Error picking image", e.message);
+      console.warn("Profile image selection error:", e);
+      Alert.alert(
+        "Could Not Select Image",
+        e?.message || "Unable to select the image. Please try another photo.",
+      );
     }
   };
 
@@ -66,13 +76,24 @@ export default function ProfileScreen() {
       setIsSaving(true);
       let newAvatarUrl = profile?.avatar_url || null;
 
-      // If the uri changed and it's a local file (starts with file://), upload it
-      if (avatarUri && avatarUri.startsWith("file://")) {
+      // Upload if the user selected a new local image
+      const isLocalUri =
+        avatarUri &&
+        (avatarUri.startsWith("file://") || avatarUri.startsWith("content://"));
+
+      if (pickedAvatarAsset) {
+        newAvatarUrl = await uploadAvatar(
+          pickedAvatarAsset.uri,
+          pickedAvatarAsset.base64,
+        );
+      } else if (isLocalUri && avatarUri) {
         newAvatarUrl = await uploadAvatar(avatarUri);
       }
 
       await updateProfile(fullName, newAvatarUrl);
-      setAvatarUri(newAvatarUrl); // Update local state to public URL
+      setProfile((prev) => (prev ? { ...prev, full_name: fullName, avatar_url: newAvatarUrl } : prev));
+      setAvatarUri(newAvatarUrl);
+      setPickedAvatarAsset(null);
       Alert.alert("Success", "Profile updated successfully!");
     } catch (error: any) {
       Alert.alert("Error", error.message || "Could not save profile.");

@@ -9,8 +9,10 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Image,
 } from "react-native";
@@ -60,7 +62,7 @@ export default function NewChatScreen() {
       "How do I adopt a child legally?",
       "What constitutes sexual harassment in the workplace?",
       "How can I change my legal name?",
-      "What is the Anti-Violence Against Women and Their Children Act?"
+      "What is the Anti-Violence Against Women and Their Children Act?",
     ];
     return [...allSuggestions].sort(() => 0.5 - Math.random()).slice(0, 3);
   });
@@ -73,6 +75,23 @@ export default function NewChatScreen() {
   useEffect(() => {
     getLawTypes().then(setLawTypes).catch(() => {});
   }, []);
+
+  const scrollToBottom = useCallback(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages.length]);
+
+  // Auto-scroll when the keyboard opens
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const sub = Keyboard.addListener(showEvent, () => {
+      scrollToBottom();
+    });
+    return () => sub.remove();
+  }, [scrollToBottom]);
 
   const handleToggleFilter = useCallback((type: string) => {
     setSelectedTypes((prev) =>
@@ -167,26 +186,21 @@ export default function NewChatScreen() {
     [chatId]
   );
 
-  const scrollToBottom = useCallback(() => {
-    if (flatListRef.current && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [messages.length]);
-
   const renderWelcomeHeader = () => {
     if (messages.length > 0) return null;
 
     return (
-      <View
-        style={{
-          flex: 1,
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          flexGrow: 1,
           justifyContent: "center",
           alignItems: "center",
           paddingHorizontal: 32,
-          paddingVertical: 60,
+          paddingVertical: 24,
         }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Image
           source={require("../../../assets/logo.png")}
@@ -249,7 +263,7 @@ export default function NewChatScreen() {
             </View>
           ))}
         </View>
-      </View>
+      </ScrollView>
     );
   };
 
@@ -268,43 +282,47 @@ export default function NewChatScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      style={{ flex: 1, backgroundColor: theme.background }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 80}
     >
       <View style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Filter bar */}
-      {lawTypes.length > 0 && (
-        <FilterChips
-          lawTypes={lawTypes}
-          selectedTypes={selectedTypes}
-          onToggle={handleToggleFilter}
-          onClear={handleClearFilters}
-        />
-      )}
+        {lawTypes.length > 0 && (
+          <FilterChips
+            lawTypes={lawTypes}
+            selectedTypes={selectedTypes}
+            onToggle={handleToggleFilter}
+            onClear={handleClearFilters}
+          />
+        )}
 
-      {/* Messages list */}
-      {messages.length === 0 ? (
-        renderWelcomeHeader()
-      ) : (
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={{
-            paddingTop: 16,
-            paddingBottom: 8,
-          }}
-          onContentSizeChange={scrollToBottom}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={isLoading ? <LoadingDots /> : null}
-        />
-      )}
+        {/* Messages list */}
+        {messages.length === 0 ? (
+          renderWelcomeHeader()
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={{
+              paddingTop: 16,
+              paddingBottom: 16,
+            }}
+            onContentSizeChange={scrollToBottom}
+            onLayout={scrollToBottom}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={false}
+            ListFooterComponent={isLoading ? <LoadingDots /> : null}
+          />
+        )}
 
         <ChatInput
           onSend={handleSend}
           onFileSelected={handleFileSelected}
+          onFocus={scrollToBottom}
           isLoading={isLoading}
         />
       </View>
