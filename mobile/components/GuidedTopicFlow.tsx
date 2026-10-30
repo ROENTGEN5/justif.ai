@@ -17,6 +17,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "../lib/theme";
+import { textFix, singleLine } from "../lib/textFix";
 
 export type PreferredLanguage = "English" | "Filipino" | "Taglish";
 
@@ -222,6 +223,7 @@ const STEP_LABELS: Record<
   {
     guidedHeader: string;
     guidedSubtext: string;
+    guidedCollapsedHint: string;
     whatHappened: string;
     whatPlaceholder: string;
     when: string;
@@ -236,6 +238,7 @@ const STEP_LABELS: Record<
   English: {
     guidedHeader: "Optional Guided Question Builder",
     guidedSubtext: "Share as much or as little as you want. All fields are optional.",
+    guidedCollapsedHint: "Need help structuring your question? Tap to open the guided helper.",
     whatHappened: "1. What happened?",
     whatPlaceholder: "Briefly describe what happened (optional)...",
     when: "2. When?",
@@ -249,6 +252,7 @@ const STEP_LABELS: Record<
   Filipino: {
     guidedHeader: "Opsyonal na Gabay sa Pagtatanong",
     guidedSubtext: "Ilagay lamang ang mga detalyeng nais mong ibahagi. Opsyonal ang lahat ng patlang.",
+    guidedCollapsedHint: "Kailangan ng tulong sa pagbuo ng tanong? Pindutin para buksan ang gabay.",
     whatHappened: "1. Ano ang nangyari? (What happened?)",
     whatPlaceholder: "Ipaliwanag nang maikli ang nangyari (opsyonal)...",
     when: "2. Kailan? (When?)",
@@ -262,6 +266,7 @@ const STEP_LABELS: Record<
   Taglish: {
     guidedHeader: "Optional Guided Question Flow",
     guidedSubtext: "Punan lang ang applicable sa sitwasyon mo. Optional lahat ng fields.",
+    guidedCollapsedHint: "Need help i-structure ang tanong mo? Tap para buksan ang guided helper.",
     whatHappened: "1. What happened? (Ano ang nangyari?)",
     whatPlaceholder: "I-kwento nang maikli kung ano ang nangyari (optional)...",
     when: "2. When? (Kailan nangyari?)",
@@ -331,7 +336,9 @@ export default function GuidedTopicFlow({
   onPrefillPrompt,
 }: GuidedTopicFlowProps) {
   const { theme } = useTheme();
-  const [isGuidedOpen, setIsGuidedOpen] = useState(true);
+  // Collapsed by default so the starter questions and chat input are visible
+  // immediately; users can expand the builder when they want structure.
+  const [isGuidedOpen, setIsGuidedOpen] = useState(false);
   const [whatHappened, setWhatHappened] = useState("");
   const [whenText, setWhenText] = useState("");
   const [desiredOutcome, setDesiredOutcome] = useState("");
@@ -363,6 +370,7 @@ export default function GuidedTopicFlow({
       {/* ─── Explicit Language Selector (English / Filipino / Taglish) ─── */}
       <View style={{ marginBottom: 16 }}>
         <Text
+          {...textFix}
           accessibilityRole="header"
           style={{
             fontSize: 11,
@@ -381,8 +389,11 @@ export default function GuidedTopicFlow({
           accessibilityLabel="Select response language: English, Filipino, or Taglish"
           style={{
             flexDirection: "row",
-            flexWrap: "wrap",
-            gap: 8,
+            padding: 3,
+            borderRadius: 14,
+            backgroundColor: theme.surfaceElevated,
+            borderWidth: 1,
+            borderColor: theme.border,
           }}
         >
           {LANGUAGE_OPTIONS.map((option) => {
@@ -400,45 +411,45 @@ export default function GuidedTopicFlow({
                 }}
                 style={{
                   flex: 1,
-                  minWidth: 92,
-                  minHeight: 42,
-                  paddingHorizontal: 12,
+                  minHeight: 38,
+                  paddingHorizontal: 6,
                   paddingVertical: 8,
-                  borderRadius: 14,
-                  backgroundColor: selected ? theme.chipActiveBg : theme.cardBg,
-                  borderWidth: 1,
-                  borderColor: selected ? theme.chipActiveBg : theme.border,
+                  borderRadius: 11,
+                  backgroundColor: selected ? theme.chipActiveBg : "transparent",
                   alignItems: "center",
                   justifyContent: "center",
                 }}
               >
                 <Text
+                  {...singleLine}
                   style={{
                     fontSize: 13,
-                    fontWeight: selected ? "700" : "600",
-                    color: selected ? theme.chipActiveText : theme.text,
+                    fontWeight: selected ? "700" : "500",
+                    color: selected ? theme.chipActiveText : theme.chipText,
                   }}
                 >
                   {option.label}
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 10,
-                    color: selected ? theme.chipActiveText : theme.textTertiary,
-                    opacity: selected ? 0.9 : 1,
-                    marginTop: 1,
-                  }}
-                >
-                  {option.sublabel}
                 </Text>
               </TouchableOpacity>
             );
           })}
         </View>
+        <Text
+          {...textFix}
+          style={{
+            fontSize: 11,
+            color: theme.textTertiary,
+            marginTop: 6,
+            marginLeft: 4,
+          }}
+        >
+          {LANGUAGE_OPTIONS.find((o) => o.id === preferredLanguage)?.sublabel}
+        </Text>
       </View>
 
       {/* ─── Categorized Legal Topic Selector Pills ─── */}
       <Text
+        {...textFix}
         accessibilityRole="header"
         style={{
           fontSize: 11,
@@ -482,6 +493,7 @@ export default function GuidedTopicFlow({
                 paddingHorizontal: 12,
                 paddingVertical: 8,
                 minHeight: 38,
+                maxWidth: "100%",
                 borderRadius: 20,
                 backgroundColor: isSelected ? theme.chipActiveBg : theme.cardBg,
                 borderWidth: 1,
@@ -490,10 +502,12 @@ export default function GuidedTopicFlow({
             >
               <Text style={{ fontSize: 13 }}>{category.emoji}</Text>
               <Text
+                {...singleLine}
                 style={{
+                  flexShrink: 1,
                   fontSize: 12,
                   fontWeight: isSelected ? "700" : "600",
-                  color: isSelected ? theme.chipActiveText : theme.textSecondary,
+                  color: isSelected ? theme.chipActiveText : theme.chipText,
                 }}
               >
                 {category.label}
@@ -535,6 +549,7 @@ export default function GuidedTopicFlow({
             <Ionicons name="compass-outline" size={18} color={theme.accent} />
             <View style={{ flex: 1 }}>
               <Text
+                {...textFix}
                 style={{
                   fontSize: 14,
                   fontWeight: "700",
@@ -544,13 +559,15 @@ export default function GuidedTopicFlow({
                 {labels.guidedHeader}
               </Text>
               <Text
+                {...textFix}
                 style={{
                   fontSize: 11,
                   color: theme.textSecondary,
                   marginTop: 1,
+                  lineHeight: 15,
                 }}
               >
-                {labels.guidedSubtext}
+                {isGuidedOpen ? labels.guidedSubtext : labels.guidedCollapsedHint}
               </Text>
             </View>
           </View>
@@ -566,6 +583,7 @@ export default function GuidedTopicFlow({
             {/* Step 1: What happened? */}
             <View style={{ gap: 6 }}>
               <Text
+                {...textFix}
                 style={{
                   fontSize: 12,
                   fontWeight: "700",
@@ -589,21 +607,24 @@ export default function GuidedTopicFlow({
                         setWhatHappened(selected ? "" : sit);
                       }}
                       style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        minHeight: 32,
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        minHeight: 34,
+                        maxWidth: "100%",
                         borderRadius: 12,
                         backgroundColor: selected ? theme.chipActiveBg : theme.surfaceElevated,
                         borderWidth: 1,
-                        borderColor: selected ? theme.chipActiveBg : theme.border,
+                        borderColor: selected ? theme.chipActiveBg : theme.chipBorder,
                         justifyContent: "center",
                       }}
                     >
                       <Text
+                        {...textFix}
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
+                          lineHeight: 16,
                           fontWeight: selected ? "700" : "500",
-                          color: selected ? theme.chipActiveText : theme.textSecondary,
+                          color: selected ? theme.chipActiveText : theme.chipText,
                         }}
                       >
                         {sit}
@@ -636,6 +657,7 @@ export default function GuidedTopicFlow({
             {/* Step 2: When? */}
             <View style={{ gap: 6 }}>
               <Text
+                {...textFix}
                 style={{
                   fontSize: 12,
                   fontWeight: "700",
@@ -659,21 +681,24 @@ export default function GuidedTopicFlow({
                         setWhenText(selected ? "" : option);
                       }}
                       style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        minHeight: 32,
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        minHeight: 34,
+                        maxWidth: "100%",
                         borderRadius: 12,
                         backgroundColor: selected ? theme.chipActiveBg : theme.surfaceElevated,
                         borderWidth: 1,
-                        borderColor: selected ? theme.chipActiveBg : theme.border,
+                        borderColor: selected ? theme.chipActiveBg : theme.chipBorder,
                         justifyContent: "center",
                       }}
                     >
                       <Text
+                        {...textFix}
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
+                          lineHeight: 16,
                           fontWeight: selected ? "700" : "500",
-                          color: selected ? theme.chipActiveText : theme.textSecondary,
+                          color: selected ? theme.chipActiveText : theme.chipText,
                         }}
                       >
                         {option}
@@ -705,6 +730,7 @@ export default function GuidedTopicFlow({
             {/* Step 3: What outcome do you want? */}
             <View style={{ gap: 6 }}>
               <Text
+                {...textFix}
                 style={{
                   fontSize: 12,
                   fontWeight: "700",
@@ -728,21 +754,24 @@ export default function GuidedTopicFlow({
                         setDesiredOutcome(selected ? "" : option);
                       }}
                       style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        minHeight: 32,
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        minHeight: 34,
+                        maxWidth: "100%",
                         borderRadius: 12,
                         backgroundColor: selected ? theme.chipActiveBg : theme.surfaceElevated,
                         borderWidth: 1,
-                        borderColor: selected ? theme.chipActiveBg : theme.border,
+                        borderColor: selected ? theme.chipActiveBg : theme.chipBorder,
                         justifyContent: "center",
                       }}
                     >
                       <Text
+                        {...textFix}
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
+                          lineHeight: 16,
                           fontWeight: selected ? "700" : "500",
-                          color: selected ? theme.chipActiveText : theme.textSecondary,
+                          color: selected ? theme.chipActiveText : theme.chipText,
                         }}
                       >
                         {option}
@@ -805,7 +834,9 @@ export default function GuidedTopicFlow({
               >
                 <Ionicons name="sparkles-outline" size={15} color={theme.accentText} />
                 <Text
+                  {...singleLine}
                   style={{
+                    flexShrink: 1,
                     fontSize: 13,
                     fontWeight: "700",
                     color: theme.accentText,
@@ -841,7 +872,9 @@ export default function GuidedTopicFlow({
                 >
                   <Ionicons name="create-outline" size={15} color={theme.text} />
                   <Text
+                    {...singleLine}
                     style={{
+                      flexShrink: 1,
                       fontSize: 12,
                       fontWeight: "600",
                       color: theme.text,
@@ -858,6 +891,7 @@ export default function GuidedTopicFlow({
 
       {/* ─── Quick-Ask Starter Prompt Cards for Selected Category & Language ─── */}
       <Text
+        {...textFix}
         accessibilityRole="header"
         style={{
           fontSize: 11,
@@ -905,6 +939,7 @@ export default function GuidedTopicFlow({
                 color={theme.accent}
               />
               <Text
+                {...textFix}
                 style={{
                   flex: 1,
                   fontSize: 13,

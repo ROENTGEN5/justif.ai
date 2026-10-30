@@ -29,6 +29,7 @@ import Markdown, { RenderRules } from "react-native-markdown-display";
 import { reportCitation, LawSource } from "../lib/api";
 import { compactCitations, findCitation, splitCitations } from "../lib/citations";
 import { useTheme } from "../lib/theme";
+import { singleLine } from "../lib/textFix";
 import { useTypewriter } from "../hooks/useTypewriter";
 
 const parseActionCards = (text: string) => {
@@ -742,6 +743,7 @@ function ChatBubble({
       >
         {timestamp && (
           <Text
+            {...singleLine}
             style={{
               fontSize: 10,
               color: theme.textTertiary,

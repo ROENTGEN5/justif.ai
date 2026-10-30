@@ -21,6 +21,7 @@ import { Strings } from "../constants/Strings";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { getChats, deleteChat, Chat, getProfile, UserProfile } from "../lib/api";
+import { textFix, singleLine } from "../lib/textFix";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -198,8 +199,9 @@ export default function DrawerContent(props: any) {
             }}
             contentFit="cover"
           />
-          <View>
+          <View style={{ flex: 1 }}>
             <Text
+              {...textFix}
               style={{
                 fontSize: 18,
                 fontWeight: "800",
@@ -210,10 +212,12 @@ export default function DrawerContent(props: any) {
               Justif.ai
             </Text>
             <Text
+              {...textFix}
               style={{
                 fontSize: 11,
                 color: theme.drawerHeaderSubtext,
                 fontStyle: "italic",
+                paddingRight: 2, // room for the italic overhang of the last glyph
               }}
             >
               {Strings.tagline}
@@ -239,6 +243,7 @@ export default function DrawerContent(props: any) {
         >
           <Ionicons name="add-circle-outline" size={20} color={theme.accentText} />
           <Text
+            {...singleLine}
             style={{
               fontSize: 15,
               fontWeight: "700",
@@ -250,56 +255,75 @@ export default function DrawerContent(props: any) {
         </TouchableOpacity>
       </View>
 
-      {/* ─── Theme Switcher ────────────────────────────── */}
+      {/* ─── Theme Switcher (segmented control) ────────── */}
       <View
         style={{
-          flexDirection: "row",
           paddingHorizontal: 20,
           paddingVertical: 12,
-          gap: 6,
           borderBottomWidth: 1,
           borderBottomColor: theme.divider,
         }}
       >
-        {themeOptions.map((opt) => (
-          <TouchableOpacity
-            key={opt.key}
-            onPress={() => setMode(opt.key)}
-            activeOpacity={0.7}
-            style={{
-              flex: 1,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              paddingVertical: 8,
-              borderRadius: 8,
-              backgroundColor: mode === opt.key ? theme.accent : theme.surfaceElevated,
-              gap: 4,
-              borderWidth: 1,
-              borderColor: mode === opt.key ? theme.accent : theme.border,
-            }}
-          >
-            <Ionicons
-              name={opt.icon as any}
-              size={14}
-              color={mode === opt.key ? theme.accentText : theme.textSecondary}
-            />
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: mode === opt.key ? "700" : "500",
-                color: mode === opt.key ? theme.accentText : theme.textSecondary,
-              }}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <View
+          accessibilityRole="radiogroup"
+          accessibilityLabel={Strings.appearance}
+          style={{
+            flexDirection: "row",
+            padding: 3,
+            borderRadius: 12,
+            backgroundColor: theme.surfaceElevated,
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}
+        >
+          {themeOptions.map((opt) => {
+            const selected = mode === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                onPress={() => setMode(opt.key)}
+                activeOpacity={0.7}
+                accessibilityRole="radio"
+                accessibilityLabel={`${opt.label} theme`}
+                accessibilityState={{ selected }}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 7,
+                  paddingHorizontal: 4,
+                  borderRadius: 9,
+                  backgroundColor: selected ? theme.accent : "transparent",
+                  gap: 5,
+                }}
+              >
+                <Ionicons
+                  name={opt.icon as any}
+                  size={14}
+                  color={selected ? theme.accentText : theme.textSecondary}
+                />
+                <Text
+                  {...singleLine}
+                  style={{
+                    flexShrink: 1,
+                    fontSize: 12,
+                    fontWeight: selected ? "700" : "500",
+                    color: selected ? theme.accentText : theme.textSecondary,
+                  }}
+                >
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
 
       {/* ─── Chat History ──────────────────────────────── */}
       <View style={{ flex: 1, paddingTop: 12 }}>
         <Text
+          {...textFix}
           style={{
             paddingHorizontal: 20,
             paddingBottom: 8,
@@ -519,6 +543,7 @@ export default function DrawerContent(props: any) {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
+                      {...textFix}
                       numberOfLines={1}
                       style={{
                         fontSize: 14,
@@ -529,6 +554,7 @@ export default function DrawerContent(props: any) {
                       {chat.title}
                     </Text>
                     <Text
+                      {...singleLine}
                       style={{
                         fontSize: 11,
                         color: theme.textTertiary,
@@ -582,6 +608,7 @@ export default function DrawerContent(props: any) {
         >
           <Ionicons name="shield-checkmark-outline" size={18} color={theme.textSecondary} />
           <Text
+            {...singleLine}
             style={{
               flex: 1,
               fontSize: 13,
@@ -638,7 +665,7 @@ export default function DrawerContent(props: any) {
           </View>
           <View style={{ flex: 1 }}>
             <Text
-              numberOfLines={1}
+              {...singleLine}
               style={{
                 fontSize: 14,
                 fontWeight: "600",
@@ -648,7 +675,7 @@ export default function DrawerContent(props: any) {
               {userDisplayName}
             </Text>
             <Text
-              numberOfLines={1}
+              {...singleLine}
               style={{
                 fontSize: 11,
                 color: theme.textTertiary,
@@ -663,21 +690,26 @@ export default function DrawerContent(props: any) {
         <TouchableOpacity
           onPress={signOut}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={Strings.signOut}
           style={{
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
             paddingVertical: 10,
+            paddingHorizontal: 16,
             borderRadius: 10,
-            backgroundColor: theme.surfaceElevated,
+            backgroundColor: Colors.error + "12",
             borderWidth: 1,
-            borderColor: theme.border,
+            borderColor: Colors.error + "33",
             gap: 8,
           }}
         >
           <Ionicons name="log-out-outline" size={18} color={Colors.error} />
           <Text
+            {...singleLine}
             style={{
+              flexShrink: 1,
               fontSize: 14,
               fontWeight: "600",
               color: Colors.error,

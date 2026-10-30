@@ -40,6 +40,7 @@ import {
   FileAttachment,
 } from "../../../lib/api";
 import { useTheme } from "../../../lib/theme";
+import { singleLine } from "../../../lib/textFix";
 
 interface DisplayMessage {
   id: string;
@@ -506,7 +507,7 @@ export default function NewChatScreen() {
               gap: 6,
             }}
           >
-            <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTertiary }}>
+            <Text {...singleLine} style={{ fontSize: 11, fontWeight: "600", color: theme.textTertiary }}>
               Language:
             </Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -534,6 +535,7 @@ export default function NewChatScreen() {
                     }}
                   >
                     <Text
+                      {...singleLine}
                       style={{
                         fontSize: 11,
                         fontWeight: selected ? "700" : "500",

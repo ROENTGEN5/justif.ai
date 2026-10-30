@@ -26,6 +26,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Strings } from "../constants/Strings";
 import { useTheme } from "../lib/theme";
+import { textFix } from "../lib/textFix";
 import type { FileAttachment } from "../lib/api";
 import { pickImageFromCamera, pickImageFromGallery } from "../lib/mediaPicker";
 
@@ -497,7 +498,9 @@ export default function ChatInput({
       >
         <Ionicons name="scale-outline" size={11} color={theme.textTertiary} />
         <Text
+          {...textFix}
           style={{
+            flexShrink: 1,
             fontSize: 10,
             color: theme.textTertiary,
             textAlign: "center",
