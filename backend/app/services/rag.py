@@ -23,7 +23,7 @@ from pinecone import Pinecone
 from app.config import settings
 from app.services import cpu_embeddings
 from app.services.corpus_identity import chunk_id
-from app.services.relevance import lexical_scores
+from app.services.relevance import lexical_scores, phrase_scores
 from app.services.law_lookup import named_laws, law_filter
 from app.services.response_planning import requested_sections
 from app.services.section_evidence import headings, join_overlap, section_excerpt
@@ -161,11 +161,14 @@ def select_evidence(results: list[SearchResult], top_k: int, query: str = "") ->
     # Lexical evidence supplements semantic similarity for explicit concepts,
     # names and article numbers. Its bounded contribution preserves semantic
     # matches for translated questions and paraphrases with little word overlap.
-    lexical = lexical_scores(query, [_content_text(r.chunk.text) for r in results])
+    bodies = [_content_text(r.chunk.text) for r in results]
+    lexical = lexical_scores(query, bodies)
+    phrases = phrase_scores(query, bodies)
     maximum = max(lexical, default=0) or 1
     ranked = [result for _, result in sorted(
         enumerate(results),
-        key=lambda pair: pair[1].score + .08 * lexical[pair[0]] / maximum - _navigation_penalty(pair[1].chunk.text),
+        key=lambda pair: (pair[1].score + .08 * lexical[pair[0]] / maximum
+                          + .12 * phrases[pair[0]] - _navigation_penalty(pair[1].chunk.text)),
         reverse=True)]
     selected, fingerprints = [], set()
     for result in ranked:

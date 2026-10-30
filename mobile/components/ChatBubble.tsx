@@ -653,7 +653,7 @@ function ChatBubble({
             })}
 
             {/* Section 3: Practical Next Steps */}
-            {hasSubstantiveStructure && (
+            {hasSubstantiveStructure && nextStepsText && (
               <View
                 style={{
                   backgroundColor: theme.surfaceElevated,
@@ -682,21 +682,7 @@ function ChatBubble({
                     Practical Next Steps
                   </Text>
                 </View>
-                {nextStepsText ? (
-                  <Markdown style={markdownStyle} rules={citationRules}>{nextStepsText}</Markdown>
-                ) : (
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      lineHeight: 19,
-                      color: theme.textSecondary,
-                    }}
-                  >
-                    1. Review the cited provisions in Legal sources below to verify exact conditions and exceptions.{"\n"}
-                    2. Gather relevant dates, written notices, or contracts before taking formal action.{"\n"}
-                    3. Tap &ldquo;Ask Follow-up&rdquo; below if you want to check filing deadlines, remedies, or agency procedures.
-                  </Text>
-                )}
+                <Markdown style={markdownStyle} rules={citationRules}>{nextStepsText}</Markdown>
                 {onAskFollowUp && (
                   <TouchableOpacity
                     onPress={handleAskFollowUpAction}

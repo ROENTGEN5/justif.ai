@@ -26,3 +26,21 @@ def lexical_scores(query, documents):
             tf = counter[term]
             scores[i] += weight * (tf * 2.2) / (tf + 1.2 * (.25 + .75 * lengths[i] / average))
     return scores
+
+
+def phrase_scores(query, documents):
+    """Reward intact concepts, not isolated words shared with adjacent topics.
+
+    Use consecutive non-stopword pairs without bridging stopwords. This is a
+    bounded ranking signal, never a filter: paraphrases and translations remain
+    eligible even without an exact phrase match.
+    """
+    words = re.findall(r"[a-z0-9]+", query.casefold())
+    phrases = {(a, b) for a, b in zip(words, words[1:])
+               if a not in STOP_WORDS and b not in STOP_WORDS and len(a) > 1 and len(b) > 1}
+    scores = []
+    for document in documents:
+        words = re.findall(r"[a-z0-9]+", document.casefold())
+        pairs = set(zip(words, words[1:]))
+        scores.append(len(phrases & pairs) / max(len(phrases), 1))
+    return scores

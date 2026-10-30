@@ -11,6 +11,23 @@ def result(text, score=.9, url="https://example.test/law", title="Law", index=0)
 
 
 class RetrievalTests(unittest.TestCase):
+    def test_requested_concepts_outrank_adjacent_employment_topics(self):
+        strike = result("A worker participating in an illegal strike may lose employment status.", .94)
+        pay = result("Separation pay depends on the applicable grounds and conditions.", .90, index=1)
+        dismissal = result("Illegal dismissal remedies depend on the applicable conditions.", .90, index=2)
+        selected = select_evidence([strike, pay, dismissal], 2,
+                                   query="severance pay separation pay illegal dismissal")
+        self.assertEqual(set(selected), {pay, dismissal})
+
+    def test_phrase_matching_is_body_only_and_does_not_filter_paraphrases(self):
+        unrelated = result("[Illegal dismissal separation pay]\nStrike participation rules.", .90)
+        relevant = result("Illegal dismissal and separation pay conditions.", .90, index=1)
+        paraphrase = result("Compensation following termination of employment.", .89, index=2)
+        selected = select_evidence([unrelated, relevant, paraphrase], 3,
+                                   query="separation pay illegal dismissal")
+        self.assertIs(selected[0], relevant)
+        self.assertIn(paraphrase, selected)
+
     def test_mirrored_content_does_not_fill_evidence_slots(self):
         first = result("[Law] [Acts]\nSection 1. A person may request access to their own records.")
         mirror = result("[Other label] [Register]\nSection 1. A person may request access to their own records.", .89, "https://example.test/mirror")
