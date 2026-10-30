@@ -196,6 +196,6 @@ export const ThemePalettes = {
 } as const;
 
 export type ThemeMode = keyof typeof ThemePalettes;
-export type ThemeColors = typeof ThemePalettes.light;
+export type ThemeColors = (typeof ThemePalettes)[ThemeMode];
 
 export default Colors;

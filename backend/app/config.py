@@ -35,10 +35,12 @@ class Settings:
     # Embeddings: Nomic Cloud API (Production) & Ollama (Local Fallback)
     NOMIC_API_KEY: str = os.getenv("NOMIC_API_KEY", "")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "auto").lower()
 
     # Vision Service for Document Photos (Google Gemini)
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", "gemini-2.0-flash")
+    GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", "gemini-3.8-flash")
+    DOCUMENT_OCR_PRIMARY: str = os.getenv("DOCUMENT_OCR_PRIMARY", "deepseek").lower()
 
     # CORS
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")

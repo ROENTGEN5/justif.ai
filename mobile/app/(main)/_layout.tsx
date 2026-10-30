@@ -1,3 +1,4 @@
+import { useAuth } from "../../lib/auth";
 /**
  * Main Drawer Layout
  * Drawer navigator with custom content showing chat history.
@@ -11,9 +12,11 @@ import { useTheme } from "../../lib/theme";
 
 export default function MainLayout() {
   const { theme } = useTheme();
+  const { user } = useAuth();
 
   return (
     <Drawer
+      key={user?.id || "signed-out"}
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         headerStyle: {

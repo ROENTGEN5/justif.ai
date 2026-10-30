@@ -13,6 +13,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { ThemeProvider, useTheme } from "../lib/theme";
+import { warmUpBackend } from "../lib/api";
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -24,6 +25,15 @@ function RootLayoutNav() {
   const router = useRouter();
 
   console.log("[RootLayoutNav] isLoading:", isLoading, "session:", !!session, "segments:", segments);
+
+  // Silent cold-start ping + safety fallback to ensure splash screen hides within 2.5s
+  useEffect(() => {
+    void warmUpBackend();
+    const splashTimer = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 2500);
+    return () => clearTimeout(splashTimer);
+  }, []);
 
   useEffect(() => {
     if (isLoading) return;
@@ -38,8 +48,8 @@ function RootLayoutNav() {
     }
 
     // Hide splash screen once loading is complete and routing is handled
-    SplashScreen.hideAsync();
-  }, [session, isLoading, segments]);
+    SplashScreen.hideAsync().catch(() => {});
+  }, [session, isLoading, segments, router]);
 
   // Show loading spinner while checking auth
   if (isLoading) {

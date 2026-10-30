@@ -3,25 +3,24 @@
  * Shows chat history, new chat button, theme switcher, user profile, and sign out.
  */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
-  ActivityIndicator,
   Alert,
-  Image,
   TextInput,
+  Platform,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import Colors from "../constants/Colors";
-import Strings from "../constants/Strings";
+import { Colors, ThemeMode } from "../constants/Colors";
+import { Strings } from "../constants/Strings";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { getChats, deleteChat, Chat, getProfile, UserProfile } from "../lib/api";
-import { ThemeMode } from "../constants/Colors";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -112,26 +111,25 @@ export default function DrawerContent(props: any) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch chats and profile when drawer opens
-  const fetchData = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const [chatsData, profileData] = await Promise.all([
-        getChats(),
-        getProfile(),
-      ]);
-      setChats(chatsData);
-      setProfile(profileData);
-    } catch (error) {
-      console.error("Failed to fetch data:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
+  // Fetch chats and profile when drawer opens or user/navigation state updates
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    let active = true;
+    Promise.all([getChats(), getProfile()])
+      .then(([chatsData, profileData]) => {
+        if (!active) return;
+        setChats(chatsData);
+        setProfile(profileData);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch data:", err);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, props.state?.index]);
 
   const handleNewChat = () => {
     router.push("/(main)/chat");
@@ -153,7 +151,7 @@ export default function DrawerContent(props: any) {
           try {
             await deleteChat(chatId);
             setChats((prev) => prev.filter((c) => c.id !== chatId));
-          } catch (error) {
+          } catch {
             Alert.alert("Error", Strings.errorGeneric);
           }
         },
@@ -198,7 +196,7 @@ export default function DrawerContent(props: any) {
               borderWidth: 2,
               borderColor: theme.logoCircleBorder,
             }}
-            resizeMode="cover"
+            contentFit="cover"
           />
           <View>
             <Text
@@ -341,7 +339,12 @@ export default function DrawerContent(props: any) {
               onChangeText={setSearchQuery}
             />
             {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <TouchableOpacity
+                onPress={() => setSearchQuery("")}
+                accessibilityRole="button"
+                accessibilityLabel="Clear conversation search"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="close-circle" size={16} color={theme.textTertiary} />
               </TouchableOpacity>
             )}
@@ -349,10 +352,49 @@ export default function DrawerContent(props: any) {
         </View>
 
         {isLoading ? (
-          <View style={{ paddingVertical: 20, alignItems: "center" }}>
-            <ActivityIndicator size="small" color={theme.accent} />
+          <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 14 }}>
+            {[0.75, 0.55, 0.85, 0.65].map((widthRatio, idx) => (
+              <View
+                key={idx}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  opacity: 0.5,
+                }}
+              >
+                <View
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    backgroundColor: theme.surfaceElevated,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                />
+                <View style={{ flex: 1, gap: 6 }}>
+                  <View
+                    style={{
+                      height: 11,
+                      width: `${Math.round(widthRatio * 100)}%`,
+                      backgroundColor: theme.border,
+                      borderRadius: 5,
+                    }}
+                  />
+                  <View
+                    style={{
+                      height: 8,
+                      width: "35%",
+                      backgroundColor: theme.border,
+                      borderRadius: 4,
+                    }}
+                  />
+                </View>
+              </View>
+            ))}
           </View>
-        ) : chats.length === 0 ? (
+        ) : filteredChats.length === 0 ? (
           <View
             style={{
               paddingVertical: 30,
@@ -361,8 +403,8 @@ export default function DrawerContent(props: any) {
             }}
           >
             <Ionicons
-              name="chatbubbles-outline"
-              size={32}
+              name={searchQuery.trim().length > 0 ? "search-outline" : "chatbubbles-outline"}
+              size={30}
               color={theme.textTertiary}
             />
             <Text
@@ -373,8 +415,35 @@ export default function DrawerContent(props: any) {
                 textAlign: "center",
               }}
             >
-              {searchQuery.length > 0 ? "No matching conversations" : Strings.noChats}
+              {searchQuery.trim().length > 0
+                ? `No conversations matching "${searchQuery.trim()}"`
+                : Strings.noChats}
             </Text>
+            {searchQuery.trim().length > 0 && (
+              <TouchableOpacity
+                onPress={() => setSearchQuery("")}
+                activeOpacity={0.7}
+                style={{
+                  marginTop: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceElevated,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: theme.text,
+                  }}
+                >
+                  Clear search
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           <FlatList
@@ -382,6 +451,10 @@ export default function DrawerContent(props: any) {
             keyExtractor={(item) =>
               item.type === "header" ? `header-${item.label}` : item.chat.id
             }
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === "android"}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
               if (item.type === "header") {
@@ -549,10 +622,11 @@ export default function DrawerContent(props: any) {
             }}
           >
             {avatarUrl ? (
-              <Image 
+              <Image
                 key={avatarUrl}
-                source={{ uri: `${avatarUrl}?t=${new Date().getTime()}` }} 
-                style={{ width: "100%", height: "100%" }} 
+                source={{ uri: avatarUrl }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
               />
             ) : (
               <Ionicons

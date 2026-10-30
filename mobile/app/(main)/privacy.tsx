@@ -31,6 +31,8 @@ export default function PrivacyPolicyScreen() {
       >
         <TouchableOpacity
           onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           style={{
             width: 36,

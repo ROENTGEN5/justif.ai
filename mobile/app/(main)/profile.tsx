@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   ScrollView,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useTheme } from "../../lib/theme";
@@ -22,7 +22,7 @@ import {
   deleteUserAccount,
 } from "../../lib/api";
 import { pickImageFromGallery, NormalizedImageAsset } from "../../lib/mediaPicker";
-import Strings from "../../constants/Strings";
+import { Strings } from "../../constants/Strings";
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
@@ -38,20 +38,24 @@ export default function ProfileScreen() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   useEffect(() => {
-    loadProfile();
+    let active = true;
+    getProfile()
+      .then((p) => {
+        if (!active) return;
+        if (p) {
+          setProfile(p);
+          setFullName(p.full_name || "");
+          setAvatarUri(p.avatar_url || null);
+          setPickedAvatarAsset(null);
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
-
-  const loadProfile = async () => {
-    setIsLoading(true);
-    const p = await getProfile();
-    if (p) {
-      setProfile(p);
-      setFullName(p.full_name || "");
-      setAvatarUri(p.avatar_url || null);
-      setPickedAvatarAsset(null);
-    }
-    setIsLoading(false);
-  };
 
   const handlePickImage = async () => {
     try {
@@ -174,6 +178,9 @@ export default function ProfileScreen() {
         <TouchableOpacity
           onPress={handlePickImage}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Change profile picture"
+          accessibilityHint="Opens your photo gallery to choose a profile image"
           style={{
             width: 120,
             height: 120,
@@ -191,6 +198,7 @@ export default function ProfileScreen() {
             <Image
               source={{ uri: avatarUri }}
               style={{ width: "100%", height: "100%" }}
+              contentFit="cover"
             />
           ) : (
             <Ionicons name="person" size={60} color={theme.textTertiary} />

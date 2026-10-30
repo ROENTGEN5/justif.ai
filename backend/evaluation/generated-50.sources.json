@@ -1,0 +1,90 @@
+{
+  "model": "deepseek-chat",
+  "seed": 42,
+  "preprocessing": "complete-document-single-hop-v1",
+  "csv": "C:\\Users\\Mark\\Documents\\courses\\Capstone_Project_1\\Justif.ai\\backend\\data\\final_clean_laws.csv",
+  "documents": [
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/5/8641",
+      "sha256": "ad44835eb7339e1c4aa05b403ab3e843ba61dbc782e5a99df15e2d8dab69f5bc"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/9583",
+      "sha256": "1e8ce675e944d9766c1d1567b239aa826eead430c4fde75fbf3183aaa3b660ca"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/14398",
+      "sha256": "9933b2405b663d027c11fbb5fcb0fed3420d6cd141e4731431a714d7709876cf"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/14798",
+      "sha256": "b1b1cc6c0fac151615c6acc5157a895096ba109bb4cdd1530e867950bfc3fdc1"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/3619",
+      "sha256": "8d3e716275d9a7487f4aba39bcaac27849b5fa153ee1d985c829ad8bf6be7094"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/95289",
+      "sha256": "d5ebbb759e8215435e8e2cd1092a61d85775fde3871eb83203c0f678b4d5768d"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/17253",
+      "sha256": "48a767f8f4f02a291dd9da309f910a8d0fd10b265bb4adfc90aae7810212ea83"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/12379",
+      "sha256": "46dd61bc2f4bddc0af7d3e604a3b744a977445cf4ecd22e598aeddf62a420e74"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/23316",
+      "sha256": "90ee54c5797810b2fb4881098596555d32a6bd741721bb4d54e0271bb529df1c"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/23061",
+      "sha256": "51225a413c910a71c0b67f860c78990ae0a20790036b393f065617afc3e3ca4f"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/2510",
+      "sha256": "8658fe94c3466541d157304e4fecabfdb43171997f9c109e87cdc070975521a1"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/10468",
+      "sha256": "63d11ad119c1740cb8a08059f8ae666153c48ed2170749beaee58c4b4eaaa463"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/89638",
+      "sha256": "76ac4ff3283f9e442d1e055146d8e4ee005e504a2eb9039864678fac57d6e1b8"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/2519",
+      "sha256": "1a30a9782cd6de665b651c5bb311f9362282d8cb7f789893838f3b621a7bdd2c"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/6053",
+      "sha256": "cc61f99ccb477ea331dccdd270486cb66efffa537aa1b87136cb77e0967b8ab8"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/21637",
+      "sha256": "203299ec817ae833796cadf53ee69987500dfe43c2dd6f5137bbb08da5e410f7"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/19579",
+      "sha256": "6ab7e373cafad25727c2b3de4fa2150751a938c1958edae2df8fe732f0826a5b"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/22696",
+      "sha256": "089f562dd83fa8d1bc7daf1a18d19021d431074e8a8363c437ab7c01c110e1b2"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/25952",
+      "sha256": "9dcfd1c8a41be0f890655be060d38e6e656e2f87b3d6dd463e26fe4d3dfd9c79"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/19255",
+      "sha256": "2d2275f8e9e21b351b63a06f91866d9387c9220518a2355a4028ad6c1507e15c"
+    }
+  ],
+  "generated_samples": 51,
+  "saved_samples": 50
+}

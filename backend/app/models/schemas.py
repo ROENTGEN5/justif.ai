@@ -26,12 +26,18 @@ class LawSource(BaseModel):
     date: str = Field("", description="Date of enactment or issuance")
     url: str = Field("", description="URL to the law on the E-Library")
     label: str = Field("", description="Category label (e.g., 'Republic Acts')")
+    citation_number: int = 0
+    excerpts: list[str] = Field(default_factory=list)
+    section: str = ""
+    support_status: str = "retrieved_evidence"
+    legal_status: str = "not_verified"
 
 
 # ─── Chat Endpoints ──────────────────────────────────────────
 
 class ChatMessageRequest(BaseModel):
     """Request body for sending a chat message."""
+    request_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{16,100}$")
     chat_id: Optional[str] = Field(
         None,
         description="Existing chat ID (UUID). If None, a new chat is created."
@@ -68,6 +74,18 @@ class ChatMessageResponse(BaseModel):
         description="Law sources cited in the response."
     )
 
+class CitationReportRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Please provide a report reason")
+        return value
+
+
 class RateMessageRequest(BaseModel):
     """Request body for rating an AI response."""
     rating: str = Field(..., description="'like' or 'unlike'")
@@ -102,6 +120,7 @@ class MessageItem(BaseModel):
     content: str
     created_at: str
     rating: Optional[str] = None
+    sources: list[LawSource] = Field(default_factory=list)
 
 
 class ChatMessagesResponse(BaseModel):
@@ -138,6 +157,8 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 class FileAnalysisResponse(BaseModel):
     """Response body after analyzing an uploaded file."""
+    reading_warnings: list[str] = Field(default_factory=list)
+    page_count: int = Field(1, ge=1)
     chat_id: str = Field(..., description="The chat session ID.")
     message_id: str = Field(..., description="The ID of the assistant's message in the database.")
     response: str = Field(..., description="The AI assistant's analysis of the file.")

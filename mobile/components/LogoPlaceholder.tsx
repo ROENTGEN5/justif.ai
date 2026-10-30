@@ -6,7 +6,7 @@
 
 import React from "react";
 import { View, Text } from "react-native";
-import Strings from "../constants/Strings";
+import { Strings } from "../constants/Strings";
 import { useTheme } from "../lib/theme";
 
 interface LogoPlaceholderProps {

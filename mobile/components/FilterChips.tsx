@@ -6,7 +6,8 @@
 import React from "react";
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Colors from "../constants/Colors";
+import * as Haptics from "expo-haptics";
+import { Colors } from "../constants/Colors";
 import { useTheme } from "../lib/theme";
 
 interface FilterChipsProps {
@@ -31,9 +32,19 @@ const shortLabels: Record<string, string> = {
   "1934-35 ConCon": "ConCon",
 };
 
-export default function FilterChips({ lawTypes, selectedTypes, onToggle, onClear }: FilterChipsProps) {
+function FilterChips({ lawTypes, selectedTypes, onToggle, onClear }: FilterChipsProps) {
   const { theme } = useTheme();
   const hasSelection = selectedTypes.length > 0;
+
+  const handleToggle = (type: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onToggle(type);
+  };
+
+  const handleClear = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onClear();
+  };
 
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: theme.border, backgroundColor: theme.background }}>
@@ -43,15 +54,30 @@ export default function FilterChips({ lawTypes, selectedTypes, onToggle, onClear
           <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTertiary }}>Filter:</Text>
         </View>
         {hasSelection && (
-          <TouchableOpacity onPress={onClear} activeOpacity={0.7} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: Colors.error + "15", borderWidth: 1, borderColor: Colors.error + "30" }}>
+          <TouchableOpacity
+            onPress={handleClear}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Clear all law type filters"
+            style={{ paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: "center", borderRadius: 16, backgroundColor: Colors.error + "15", borderWidth: 1, borderColor: Colors.error + "30" }}
+          >
             <Text style={{ fontSize: 11, fontWeight: "600", color: Colors.error }}>✕ Clear</Text>
           </TouchableOpacity>
         )}
         {lawTypes.map((type) => {
           const isSelected = selectedTypes.includes(type);
+          const label = shortLabels[type] || type;
           return (
-            <TouchableOpacity key={type} onPress={() => onToggle(type)} activeOpacity={0.7} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: isSelected ? theme.chipActiveBg : theme.chipBg, borderWidth: 1, borderColor: isSelected ? theme.chipActiveBg : theme.chipBorder }}>
-              <Text style={{ fontSize: 11, fontWeight: isSelected ? "700" : "500", color: isSelected ? theme.chipActiveText : theme.chipText }}>{shortLabels[type] || type}</Text>
+            <TouchableOpacity
+              key={type}
+              onPress={() => handleToggle(type)}
+              activeOpacity={0.7}
+              accessibilityRole="checkbox"
+              accessibilityLabel={`Filter by ${label}`}
+              accessibilityState={{ checked: isSelected }}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, minHeight: 32, justifyContent: "center", borderRadius: 16, backgroundColor: isSelected ? theme.chipActiveBg : theme.chipBg, borderWidth: 1, borderColor: isSelected ? theme.chipActiveBg : theme.chipBorder }}
+            >
+              <Text style={{ fontSize: 11, fontWeight: isSelected ? "700" : "500", color: isSelected ? theme.chipActiveText : theme.chipText }}>{label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -59,3 +85,5 @@ export default function FilterChips({ lawTypes, selectedTypes, onToggle, onClear
     </View>
   );
 }
+
+export default React.memo(FilterChips);

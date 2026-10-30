@@ -50,3 +50,8 @@ yarn.lock
 
 # Large data files (exceeds GitHub 100MB limit)
 backend/data/final_clean_laws.csv
+
+# Local generated artifacts and server logs
+/tmp/
+/output/
+*.log

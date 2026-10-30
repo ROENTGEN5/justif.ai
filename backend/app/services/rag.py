@@ -8,8 +8,12 @@ Embeddings: Nomic Cloud API (nomic-embed-text-v1.5) or Ollama nomic-embed-text (
 """
 
 import csv
+from collections import OrderedDict
+from functools import lru_cache
 import json
 import logging
+import re
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +21,11 @@ import httpx
 import ollama
 from pinecone import Pinecone
 from app.config import settings
+from app.services.corpus_identity import chunk_id
+from app.services.relevance import lexical_scores
+from app.services.law_lookup import named_laws, law_filter
+from app.services.response_planning import requested_sections
+from app.services.section_evidence import headings, join_overlap, section_excerpt
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +114,70 @@ class SearchResult:
             "score": round(float(self.score), 4),
             "text_preview": self.chunk.text[:200] + "..." if len(self.chunk.text) > 200 else self.chunk.text,
         }
+
+
+class RAGSearchError(RuntimeError):
+    """Retrieval could not execute; distinct from a successful empty search."""
+
+
+def source_key(source: dict) -> str:
+    """Keep distinct legal documents separate even when their titles coincide."""
+    url = source.get("url", "").strip()
+    if url:
+        return "url:" + url
+    title = source.get("full_title") or source.get("short_title", "")
+    return "title:" + " ".join(title.casefold().split()) + "|" + source.get("date", "") if title else ""
+
+
+def _content_text(text: str) -> str:
+    # Indexed chunks start with a metadata header. Compare the legal body so
+    # mirrored publications with different labels do not occupy multiple slots.
+    return re.sub(r"^(?:\[[^\]\n]*\]\s*)+\n?", "", text).strip()
+
+
+def _normalized_content(text: str) -> str:
+    return " ".join(_content_text(text).casefold().split())
+
+
+def _navigation_penalty(text: str) -> float:
+    """Demote dense contents lists, without excluding substantive numbered rules."""
+    body = _content_text(text)
+    headings = list(re.finditer(r"\b\d{1,3}\.\s+[A-Z]", body))
+    if len(headings) < 6:
+        return 0.0
+    intervals = [b.start() - a.start() for a, b in zip(headings, headings[1:])]
+    short_intervals = sum(length < 80 for length in intervals)
+    return 0.12 if short_intervals / len(intervals) >= 0.8 else 0.0
+
+
+def select_evidence(results: list[SearchResult], top_k: int, query: str = "") -> list[SearchResult]:
+    """Select distinct evidence from an expanded semantic candidate set.
+
+    The original vector scores are retained for diagnostics. Only normalized
+    identical bodies are removed: a one-word change can reverse a legal rule,
+    so fuzzy similarity must not discard differently worded provisions.
+    """
+    # Lexical evidence supplements semantic similarity for explicit concepts,
+    # names and article numbers. Its bounded contribution preserves semantic
+    # matches for translated questions and paraphrases with little word overlap.
+    lexical = lexical_scores(query, [_content_text(r.chunk.text) for r in results])
+    maximum = max(lexical, default=0) or 1
+    ranked = [result for _, result in sorted(
+        enumerate(results),
+        key=lambda pair: pair[1].score + .08 * lexical[pair[0]] / maximum - _navigation_penalty(pair[1].chunk.text),
+        reverse=True)]
+    selected, fingerprints = [], set()
+    for result in ranked:
+        fingerprint = _normalized_content(result.chunk.text)
+        if not fingerprint or not source_key(result.chunk.to_dict()):
+            continue
+        if fingerprint in fingerprints:
+            continue
+        selected.append(result)
+        fingerprints.add(fingerprint)
+        if len(selected) == top_k:
+            break
+    return selected
 
 
 # ─── Chunking ───────────────────────────────────────────────
@@ -225,6 +298,28 @@ def load_and_chunk_csv(csv_path: str = None, max_laws: int = None) -> list[Chunk
 # Ollama client — initialized with configurable host
 _ollama_client = ollama.Client(host=settings.OLLAMA_BASE_URL)
 
+# Persistent HTTP client pool for Nomic Cloud API (avoids repeated TCP/TLS handshakes)
+_nomic_http_client: Optional[httpx.Client] = None
+
+
+def _get_nomic_http_client() -> httpx.Client:
+    """Return a shared persistent HTTP client for Nomic Cloud API requests."""
+    global _nomic_http_client
+    if _nomic_http_client is None or _nomic_http_client.is_closed:
+        _nomic_http_client = httpx.Client(
+            timeout=30.0,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _nomic_http_client
+
+
+def close_nomic_http_client() -> None:
+    """Close the shared Nomic HTTP client pool when shutting down."""
+    global _nomic_http_client
+    if _nomic_http_client is not None and not _nomic_http_client.is_closed:
+        _nomic_http_client.close()
+        _nomic_http_client = None
+
 
 def _embed_via_nomic_api(texts: list[str], task_type: str = "search_query") -> list[list[float]]:
     """
@@ -241,11 +336,28 @@ def _embed_via_nomic_api(texts: list[str], task_type: str = "search_query") -> l
         "task_type": task_type,
         "dimensionality": EMBEDDING_DIM,
     }
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.post(NOMIC_EMBED_URL, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["embeddings"]
+    client = _get_nomic_http_client()
+    resp = client.post(NOMIC_EMBED_URL, headers=headers, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["embeddings"]
+
+
+@lru_cache(maxsize=512)
+def _cached_embed_query(text: str, nomic_api_key: str) -> tuple[float, ...]:
+    """Internal LRU-cached query embedding helper returning an immutable tuple."""
+    if nomic_api_key:
+        try:
+            embeddings = _embed_via_nomic_api([text], task_type="search_query")
+            return tuple(embeddings[0])
+        except Exception as e:
+            logger.warning(f"Nomic Cloud API embedding failed, falling back to Ollama: {e}")
+
+    response = _ollama_client.embed(
+        model=EMBEDDING_MODEL,
+        input=f"search_query: {text}",
+    )
+    return tuple(response["embeddings"][0])
 
 
 def embed_query(text: str) -> list[float]:
@@ -254,18 +366,12 @@ def embed_query(text: str) -> list[float]:
     Uses Nomic Cloud API when NOMIC_API_KEY is set (for cloud deployments like Render),
     and falls back to local Ollama nomic-embed-text.
     """
-    if settings.NOMIC_API_KEY:
-        try:
-            embeddings = _embed_via_nomic_api([text], task_type="search_query")
-            return embeddings[0]
-        except Exception as e:
-            logger.warning(f"Nomic Cloud API embedding failed, falling back to Ollama: {e}")
+    key = settings.NOMIC_API_KEY if settings.EMBEDDING_PROVIDER != "local" else ""
+    return list(_cached_embed_query(text, key or ""))
 
-    response = _ollama_client.embed(
-        model=EMBEDDING_MODEL,
-        input=f"search_query: {text}",
-    )
-    return response["embeddings"][0]
+
+embed_query.cache_clear = _cached_embed_query.cache_clear  # type: ignore[attr-defined]
+embed_query.cache_info = _cached_embed_query.cache_info    # type: ignore[attr-defined]
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
@@ -273,7 +379,7 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     Embed a batch of document texts into 768-dim vectors.
     Uses Nomic Cloud API when NOMIC_API_KEY is set, otherwise local Ollama.
     """
-    if settings.NOMIC_API_KEY:
+    if settings.NOMIC_API_KEY and settings.EMBEDDING_PROVIDER != "local":
         try:
             return _embed_via_nomic_api(texts, task_type="search_document")
         except Exception as e:
@@ -301,6 +407,11 @@ class RAGService:
         self.index = None
         self._total_vectors: int = 0
         self._loaded = False
+        self._section_cache: OrderedDict[tuple, tuple[SearchResult, ...]] = OrderedDict()
+
+    def clear_cache(self) -> None:
+        """Clear the canonical law-section lookup cache."""
+        self._section_cache.clear()
 
     def initialize(self):
         """Connect to Pinecone index and verify embedding service is available."""
@@ -325,7 +436,7 @@ class RAGService:
             )
 
             # Check embedding provider availability
-            if settings.NOMIC_API_KEY:
+            if settings.NOMIC_API_KEY and settings.EMBEDDING_PROVIDER != "local":
                 logger.info(f"Using Nomic Cloud API ('{NOMIC_CLOUD_MODEL}') for query embeddings")
             else:
                 try:
@@ -358,11 +469,75 @@ class RAGService:
             return [None] * self._total_vectors
         return None
 
+    def _requested_sections(self, candidates, targets, top_k):
+        """Use existing metadata/IDs to join up to five consecutive chunks.
+
+        There is no index mutation. Fetch identity is checked against URL and
+        title because legacy IDs do not include URL and can collide.
+        """
+        windows, seen = [], set()
+        for target in targets:
+            anchors = [r for r in candidates if any((kind, number) == target
+                       for _, _, kind, number in headings(_content_text(r.chunk.text)))]
+            for anchor in sorted(anchors, key=lambda r: r.score, reverse=True):
+                chunk = anchor.chunk
+                key = (chunk.url, target)
+                if not chunk.url or key in seen:
+                    continue
+                seen.add(key)
+                start = int(chunk.chunk_index)
+                total = int(chunk.total_chunks)
+                by_index = {int(r.chunk.chunk_index): r.chunk for r in candidates
+                            if r.chunk.url == chunk.url and r.chunk.short_title == chunk.short_title
+                            and r.chunk.label == chunk.label}
+                last_allowed = min(start + 4, total - 1)
+                body, end_index = _content_text(chunk.text), start
+                excerpt = section_excerpt(body, target, at_document_end=start == total - 1)
+                if excerpt and not excerpt[1]:
+                    missing = [i for i in range(start + 1, last_allowed + 1) if i not in by_index]
+                    if missing:
+                        ids = {hashlib.md5(f"{chunk.short_title}|{chunk.label}|{i}".encode(), usedforsecurity=False).hexdigest(): i for i in missing}
+                        ids.update({chunk_id(chunk.url, i): i for i in missing})
+                        try:
+                            fetched = self.index.fetch(ids=list(ids))
+                            for vector_id, vector in fetched.vectors.items():
+                                meta = vector.metadata or {}
+                                expected = ids.get(vector_id)
+                                if (meta.get("url") != chunk.url or meta.get("short_title") != chunk.short_title
+                                        or meta.get("label") != chunk.label or meta.get("chunk_index") != expected):
+                                    continue
+                                by_index[expected] = ChunkMetadata(chunk.short_title, chunk.full_title,
+                                    chunk.law_type, chunk.date, chunk.url, chunk.label, expected, total, meta.get("text", ""))
+                        except Exception as exc:
+                            # Existing retrieval remains usable, explicitly marked
+                            # incomplete; a best-effort neighbor fetch isn't an outage.
+                            logger.warning("Section continuation unavailable (%s)", type(exc).__name__)
+                    for position in range(start + 1, last_allowed + 1):
+                        if position not in by_index:
+                            break  # Never bridge a missing chunk as continuous text.
+                        body = join_overlap(body, _content_text(by_index[position].text))
+                        end_index = position
+                        excerpt = section_excerpt(body, target, at_document_end=position == total - 1)
+                        if excerpt and excerpt[1]:
+                            break
+                if not excerpt:
+                    continue
+                merged = SearchResult(ChunkMetadata(chunk.short_title, chunk.full_title, chunk.law_type,
+                    chunk.date, chunk.url, chunk.label, start, total, excerpt[0]), anchor.score)
+                merged.evidence_span = {"kind": target[0], "number": target[1], "start_chunk": start,
+                                        "end_chunk": end_index, "complete": excerpt[1]}
+                windows.append(merged)
+                if len(windows) == top_k:
+                    return windows
+        return windows
+
     def search(
         self,
         query: str,
         top_k: int = 5,
         law_types: Optional[list[str]] = None,
+        strict: bool = False,
+        law_query: Optional[str] = None,
     ) -> list[SearchResult]:
         """
         Search for the most relevant law chunks for a given query.
@@ -371,52 +546,100 @@ class RAGService:
             query: The user's legal question.
             top_k: Number of results to return.
             law_types: Optional filter — only return chunks from these law categories.
+            strict: Raise RAGSearchError on service failure instead of returning [].
+            law_query: Original user question; prevents a rewritten law number
+                from determining the exact-law filter.
 
         Returns:
             List of SearchResult objects, sorted by relevance.
         """
+        if not 1 <= top_k <= 100:
+            raise ValueError("top_k must be between 1 and 100")
         if not self.is_ready:
+            if strict:
+                raise RAGSearchError("Legal retrieval service is unavailable")
             logger.warning("RAG service not initialized. Returning empty results.")
             return []
 
         try:
+            references = named_laws(query if law_query is None else law_query)
+            sections = requested_sections(query if law_query is None else law_query)
+            cache_key = None
+            if references and sections:
+                cache_key = (
+                    tuple((r["family"], r["number"], r["implementing_rules"]) for r in references),
+                    tuple(sections),
+                    tuple(law_types or ()),
+                    top_k,
+                    query.strip().lower(),
+                )
+                if cache_key in self._section_cache:
+                    self._section_cache.move_to_end(cache_key)
+                    return list(self._section_cache[cache_key])
+
             # Embed the query using Nomic Cloud API or Ollama
             query_embedding = embed_query(query)
 
-            # Build Pinecone metadata filter
-            pinecone_filter = None
-            if law_types:
-                pinecone_filter = {"label": {"$in": law_types}}
-
-            # Query Pinecone
-            query_response = self.index.query(
-                vector=query_embedding,
-                top_k=top_k,
-                include_metadata=True,
-                filter=pinecone_filter,
-            )
+            # Exact metadata matching avoids substituting a semantically similar
+            # law when the user explicitly names one. No unfiltered fallback.
+            filters = ([law_filter(ref, law_types) for ref in references] if references else
+                       [{"label": {"$in": law_types}} if law_types else None])
+            matches = []
+            for pinecone_filter in filters:
+                query_response = self.index.query(
+                    vector=query_embedding,
+                    top_k=100 if references and sections else min(100, max(40, top_k * 8)),
+                    include_metadata=True,
+                    filter=pinecone_filter,
+                )
+                matches.append(query_response.matches)
 
             # Convert Pinecone results to SearchResult objects
-            results = []
-            for match in query_response.matches:
-                meta = match.metadata or {}
-                chunk = ChunkMetadata(
-                    short_title=meta.get("short_title", ""),
-                    full_title=meta.get("full_title", ""),
-                    law_type=meta.get("law_type", ""),
-                    date=meta.get("date", ""),
-                    url=meta.get("url", ""),
-                    label=meta.get("label", ""),
-                    chunk_index=meta.get("chunk_index", 0),
-                    total_chunks=meta.get("total_chunks", 1),
-                    text=meta.get("text", ""),
-                )
-                results.append(SearchResult(chunk=chunk, score=match.score))
-
-            return results
+            groups = []
+            for group in matches:
+                results = []
+                for match in group:
+                    meta = match.metadata or {}
+                    chunk = ChunkMetadata(
+                        short_title=meta.get("short_title", ""),
+                        full_title=meta.get("full_title", ""),
+                        law_type=meta.get("law_type", ""),
+                        date=meta.get("date", ""),
+                        url=meta.get("url", ""),
+                        label=meta.get("label", ""),
+                        chunk_index=meta.get("chunk_index", 0),
+                        total_chunks=meta.get("total_chunks", 1),
+                        text=meta.get("text", ""),
+                    )
+                    results.append(SearchResult(chunk=chunk, score=match.score))
+                windows = self._requested_sections(results, sections, top_k) if references and sections else []
+                recovered = {(r.evidence_span["kind"], r.evidence_span["number"]) for r in windows}
+                if windows and all(s in recovered for s in sections):
+                    # Supply the focused section(s), not five unrelated snippets.
+                    groups.append(windows)
+                else:
+                    groups.append(windows + select_evidence(results, max(1, top_k - len(windows)), query=query))
+            # Give each explicitly requested law a chance to contribute before
+            # filling the remaining slots (useful for comparisons/amendments).
+            selected = []
+            for position in range(top_k):
+                for group in groups:
+                    if position < len(group):
+                        selected.append(group[position])
+                        if len(selected) == top_k:
+                            break
+                if len(selected) == top_k:
+                    break
+            if cache_key is not None and selected:
+                self._section_cache[cache_key] = tuple(selected)
+                if len(self._section_cache) > 128:
+                    self._section_cache.popitem(last=False)
+            return selected
 
         except Exception as e:
             logger.error(f"RAG search error: {e}", exc_info=True)
+            if strict:
+                raise RAGSearchError("Legal retrieval failed") from e
             return []
 
     def format_context(self, results: list[SearchResult]) -> str:
@@ -448,7 +671,7 @@ class RAGService:
         """
         Format context for the LLM using deduplicated source numbering.
 
-        Groups chunks by their source title and numbers them to match
+        Groups chunks by their source identity and numbers them to match
         the deduplicated sources list, so "Source 1" in the AI's context
         corresponds exactly to Source 1 in the user's SourceCard.
         """
@@ -458,7 +681,7 @@ class RAGService:
         # Map each deduplicated source to its index (1-based)
         source_index_map: dict[str, int] = {}
         for i, src in enumerate(deduplicated_sources):
-            key = src.get("short_title") or src.get("full_title", "")
+            key = source_key(src)
             if key and key not in source_index_map:
                 source_index_map[key] = i + 1
 
@@ -468,7 +691,7 @@ class RAGService:
 
         for result in results:
             chunk = result.chunk
-            key = chunk.short_title or chunk.full_title
+            key = source_key(chunk.to_dict())
             source_num = source_index_map.get(key)
             if source_num is None:
                 continue
@@ -496,16 +719,23 @@ class RAGService:
     def get_sources(self, results: list[SearchResult]) -> list[dict]:
         """
         Extract unique source citations from search results.
-        Deduplicates by short_title.
+        Deduplicates by URL (title and date when a URL is unavailable).
         """
         seen = set()
         sources = []
 
         for result in results:
-            key = result.chunk.short_title or result.chunk.full_title
+            key = source_key(result.chunk.to_dict())
             if key and key not in seen:
                 seen.add(key)
-                sources.append(result.chunk.to_dict())
+                span = getattr(result, "evidence_span", None) or {}
+                sources.append({**result.chunk.to_dict(), "citation_number": len(sources) + 1,
+                    "excerpts": [], "section": str(span.get("kind", "")) + " " + str(span.get("number", "")),
+                    "support_status": "retrieved_evidence", "legal_status": "not_verified"})
+            if key:
+                source = next((s for s in sources if source_key(s) == key), None)
+                if source is not None and result.chunk.text not in source["excerpts"]:
+                    source["excerpts"].append(result.chunk.text[:8000])
 
         return sources
 

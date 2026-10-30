@@ -161,7 +161,7 @@ export async function normalizeAndCompressImage(
         {
           compress: quality,
           format: ImageManipulator.SaveFormat?.JPEG ?? "jpeg",
-          base64: true,
+          base64: false,
         },
       );
 
@@ -245,7 +245,7 @@ export async function pickImageFromCamera(
     allowsEditing: options.allowsEditing ?? false,
     aspect: options.aspect,
     quality,
-    base64: true,
+    base64: false,
     preferredAssetRepresentationMode:
       ImagePicker.UIImagePickerPreferredAssetRepresentationMode?.Compatible,
   });
@@ -278,7 +278,7 @@ export async function pickImageFromGallery(
       allowsEditing: options.allowsEditing ?? false,
       aspect: options.aspect,
       quality,
-      base64: true,
+      base64: false,
       preferredAssetRepresentationMode:
         ImagePicker.UIImagePickerPreferredAssetRepresentationMode?.Compatible,
     });
@@ -290,7 +290,7 @@ export async function pickImageFromGallery(
         mediaTypes: ["images"],
         allowsEditing: false,
         quality,
-        base64: true,
+        base64: false,
         preferredAssetRepresentationMode:
           ImagePicker.UIImagePickerPreferredAssetRepresentationMode?.Compatible,
       });

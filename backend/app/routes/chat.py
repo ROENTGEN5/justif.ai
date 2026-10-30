@@ -4,12 +4,18 @@ Handles RAG-powered conversations with law retrieval, messaging, and history.
 """
 
 import re
+import json
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from app.middleware.auth import get_current_user, AuthenticatedUser
 from app.services.supabase_client import get_user_client
-from app.services.deepseek import generate_response, analyze_file_content, transform_query_for_rag, generate_chat_title
-from app.services.rag import rag_service, LAW_TYPES
+from app.services.database_io import run_db
+from app.services.deepseek import generate_chat_title
+from app.services.document_pipeline import analyze_document, DocumentInputError, DocumentProviderError
+from app.services.rag import rag_service, LAW_TYPES, RAGSearchError
+from app.services.chat_pipeline import run_chat_pipeline, stream_chat_pipeline
 from app.models.schemas import (
     ChatMessageRequest,
     ChatMessageResponse,
@@ -25,7 +31,10 @@ from app.models.schemas import (
     MAX_FILE_SIZE_BYTES,
     MAX_FILE_SIZE_MB,
     RateMessageRequest,
+    CitationReportRequest,
 )
+
+from app.services.request_replay import idempotent, active_request
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +57,69 @@ def _validate_uuid(value: str, field_name: str = "ID") -> str:
     return value
 
 
+_HEIC_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"}
+
+
+def _detect_mime_from_bytes(data: bytes) -> str | None:
+    """Detect the real file type from its magic bytes (never trust client content-type)."""
+    if data.startswith(b"%PDF-"):
+        return "application/pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in _HEIC_BRANDS:
+        return "image/heic"
+    return None
+
+
+def _sanitize_filename(name: str | None) -> str:
+    """Strip path components and control characters from a client-supplied filename."""
+    base = re.split(r"[\\/]", name or "")[-1]
+    base = re.sub(r"[\x00-\x1f\x7f]", "", base).strip()
+    return base[:120] or "uploaded_file"
+
+
+def _save_chat_turn(
+    client,
+    chat_id: str,
+    user_content: str,
+    assistant_content: str,
+    extra_chat_updates: dict | None = None,
+    payload: dict | None = None,
+) -> str:
+    """Batch-insert user and assistant messages in a single round-trip and update chat timestamp."""
+    context = active_request.get()
+    if context:
+        result = client.rpc("complete_chat_request", {
+            "p_id": context["key"], "p_lease": context["lease"], "p_chat": chat_id,
+            "p_user_content": user_content, "p_payload": payload,
+        }).execute().data
+        return result["message_id"]
+    inserted = (
+        client.table("messages")
+        .insert([
+            {"chat_id": chat_id, "role": "user", "content": user_content},
+            {"chat_id": chat_id, "role": "assistant", "content": assistant_content, "sources": (payload or {}).get("sources", [])},
+        ])
+        .execute()
+    )
+    message_id = ""
+    if hasattr(inserted, "data") and inserted.data:
+        assistant_rows = [row for row in inserted.data if row.get("role") == "assistant"]
+        message_id = (assistant_rows[-1] if assistant_rows else inserted.data[-1]).get("id", "")
+
+    update_payload = {"updated_at": "now()"}
+    if extra_chat_updates:
+        update_payload.update(extra_chat_updates)
+    client.table("chats").update(update_payload).eq("id", chat_id).execute()
+    return message_id
+
+
 @router.post("/chat", response_model=ChatMessageResponse)
+@idempotent
 async def send_message(
     request: ChatMessageRequest,
     user: AuthenticatedUser = Depends(get_current_user),
@@ -65,23 +136,24 @@ async def send_message(
         if not chat_id:
             new_title = await generate_chat_title(request.message)
             chat_result = (
-                client.table("chats")
+                await run_db(client.table("chats")
                 .insert({
                     "user_id": user.user_id,
                     "title": new_title,
                 })
-                .execute()
+                .execute)
             )
             chat_id = chat_result.data[0]["id"]
             previous_messages = []
+            title = new_title
         else:
-            # Verify the chat belongs to this user
+            # Verify the chat belongs to this user and fetch title in one query
             chat_check = (
-                client.table("chats")
-                .select("id, user_id")
+                await run_db(client.table("chats")
+                .select("id, user_id, title")
                 .eq("id", chat_id)
                 .eq("user_id", user.user_id)
-                .execute()
+                .execute)
             )
 
             if not chat_check.data:
@@ -89,104 +161,26 @@ async def send_message(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Chat not found or access denied.",
                 )
+            title = chat_check.data[0].get("title") or "Bagong Usapan"
 
             # Fetch existing messages for context
             messages_result = (
-                client.table("messages")
+                await run_db(client.table("messages")
                 .select("role, content")
                 .eq("chat_id", chat_id)
-                .order("created_at", desc=False)
-                .execute()
+                .order("created_at", desc=True)
+                .limit(12)
+                .execute)
             )
-            previous_messages = messages_result.data or []
+            previous_messages = list(reversed(messages_result.data or []))
 
-        # ─── Detect conversational follow-ups ───────────────
-        FOLLOWUP_PHRASES = [
-            "summarize", "summarise", "summary",
-            "explain more", "elaborate", "can you explain",
-            "what does that mean", "what do you mean",
-            "simplify", "in simple terms", "give me an example",
-            "what should i do", "what can i do",
-            "tell me more", "more detail", "more information",
-            "can you clarify", "clarify that",
-        ]
-        msg_lower = request.message.lower().strip()
-        is_followup = any(phrase in msg_lower for phrase in FOLLOWUP_PHRASES)
+        result = await run_chat_pipeline(
+            request.message, history=previous_messages, law_types=request.law_types)
+        ai_response = result["answer"]
+        sources = [LawSource(**source) for source in result["sources"]]
 
-        # ─── RAG: Retrieve relevant law chunks ──────────────
-        sources = []
-        context = ""
-
-        if rag_service.is_ready and not is_followup:
-            # Transform the raw user query into dense legal search keywords
-            # to maximise Pinecone retrieval precision before searching
-            search_query = await transform_query_for_rag(request.message)
-
-            # Search with optional law type filter
-            search_results = rag_service.search(
-                query=search_query,
-                top_k=5,
-                law_types=request.law_types,
-            )
-
-            # Extract unique source citations FIRST (deduplicate by title)
-            raw_sources = rag_service.get_sources(search_results)
-            sources = [LawSource(**s) for s in raw_sources]
-
-            # Format context using only deduplicated sources so the AI
-            # sees the same numbered sources the user will see
-            context = rag_service.format_context_from_sources(search_results, raw_sources)
-
-            logger.info(
-                f"RAG retrieved {len(search_results)} chunks, "
-                f"{len(sources)} unique sources for user={user.user_id}"
-            )
-        elif is_followup:
-            logger.info(f"Conversational follow-up detected — skipping RAG for user={user.user_id}")
-        else:
-            logger.warning("RAG service not ready. Generating response without legal context.")
-
-        # Store the user's message
-        client.table("messages").insert({
-            "chat_id": chat_id,
-            "role": "user",
-            "content": request.message,
-        }).execute()
-
-        # Generate AI response using RAG context (or LLM knowledge if RAG context is empty)
-        is_initial = len(previous_messages) == 0
-        ai_response = await generate_response(
-            messages=previous_messages,
-            user_message=request.message,
-            context=context,
-            is_initial_query=is_initial,
-        )
-
-        # Store the AI response
-        ai_res = client.table("messages").insert({
-            "chat_id": chat_id,
-            "role": "assistant",
-            "content": ai_response,
-        }).execute()
-        message_id = ai_res.data[0]["id"] if hasattr(ai_res, "data") and ai_res.data else ""
-
-        # Update the chat's updated_at timestamp
-        client.table("chats").update({
-            "updated_at": "now()",
-        }).eq("id", chat_id).execute()
-
-        # Get the chat title
-        chat_data = (
-            client.table("chats")
-            .select("title")
-            .eq("id", chat_id)
-            .execute()
-        )
-        title = chat_data.data[0]["title"] if chat_data.data else "Bagong Usapan"
-
-        # Clear RAG sources if the AI refused a non-legal query
-        if "legal queries only" in ai_response.lower() or "only handle queries, documents, and images related to law" in ai_response.lower():
-            sources = []
+        # Batch-save user and assistant turns only after successful retrieval and generation.
+        message_id = await run_db(_save_chat_turn, client, chat_id, request.message, ai_response, payload={"response": ai_response, "title": title, "sources": [s.model_dump() for s in sources]})
 
         return ChatMessageResponse(
             chat_id=chat_id,
@@ -196,6 +190,12 @@ async def send_message(
             sources=sources,
         )
 
+    except RAGSearchError as e:
+        logger.warning("Legal retrieval unavailable: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Legal sources are temporarily unavailable. Please try again.",
+        ) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -204,6 +204,116 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message. Please try again.",
         )
+
+
+@router.post("/chat/stream")
+@idempotent
+async def stream_chat(
+    request: ChatMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Stream a RAG-powered response via Server-Sent Events (SSE).
+    Uses the unified chat pipeline and emits thinking stages, live token chunks, and final metadata/sources.
+    """
+    client = get_user_client(user.token)
+    chat_id = request.chat_id
+
+    if not chat_id:
+        new_title = await generate_chat_title(request.message)
+        chat_result = (
+            await run_db(client.table("chats")
+            .insert({
+                "user_id": user.user_id,
+                "title": new_title,
+            })
+            .execute)
+        )
+        chat_id = chat_result.data[0]["id"]
+        previous_messages = []
+        title = new_title
+    else:
+        chat_check = (
+            await run_db(client.table("chats")
+            .select("id, user_id, title")
+            .eq("id", chat_id)
+            .eq("user_id", user.user_id)
+            .execute)
+        )
+        if not chat_check.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chat not found or access denied.",
+            )
+        title = chat_check.data[0].get("title") or "Bagong Usapan"
+        messages_result = (
+            await run_db(client.table("messages")
+            .select("role, content")
+            .eq("chat_id", chat_id)
+            .order("created_at", desc=True)
+            .limit(12)
+            .execute)
+        )
+        previous_messages = list(reversed(messages_result.data or []))
+
+    async def event_generator():
+        try:
+            full_answer = ""
+            sources: list[LawSource] = []
+
+            async for event in stream_chat_pipeline(
+                request.message,
+                history=previous_messages,
+                law_types=request.law_types,
+            ):
+                event_type = event.get("type")
+                if event_type in ("thinking", "token"):
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "result":
+                    full_answer = event.get("answer") or ""
+                    sources = [LawSource(**source) for source in event.get("sources", [])]
+
+            if full_answer.strip():
+                message_id = await run_db(_save_chat_turn, client, chat_id, request.message, full_answer, payload={"response": full_answer, "title": title, "sources": [s.model_dump() for s in sources]})
+            else:
+                message_id = ""
+
+            yield f"data: {json.dumps({'type': 'done', 'chat_id': chat_id, 'message_id': message_id, 'title': title, 'response': full_answer, 'sources': [s.model_dump() for s in sources]})}\n\n"
+        except RAGSearchError as exc:
+            logger.warning("Legal retrieval unavailable in stream_chat: %s", exc)
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'Legal sources are temporarily unavailable. Please try again.'})}\n\n"
+        except Exception as exc:
+            logger.error(f"Error in stream_chat for user={user.user_id}: {exc}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'Failed to process message. Please try again.'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/messages/{message_id}/reports", status_code=201)
+async def report_citation(message_id: str, request: CitationReportRequest,
+                          user: AuthenticatedUser = Depends(get_current_user)):
+    _validate_uuid(message_id, "message_id")
+    client = get_user_client(user.token)
+    message = await run_db(client.table("messages").select("id,content,sources")
+        .eq("id", message_id).eq("role", "assistant").execute)
+    if not message.data:
+        raise HTTPException(404, "Message not found or access denied")
+    row = message.data[0]
+    saved = await run_db(client.table("citation_reports").insert({
+        "user_id": user.user_id, "message_id": message_id, "reason": request.reason.strip(),
+        "message_content": row["content"], "sources": row.get("sources") or [],
+    }).execute)
+    if not saved.data:
+        raise HTTPException(500, "Report could not be saved")
+    return {"id": saved.data[0]["id"]}
 
 
 @router.patch("/messages/{message_id}/rate")
@@ -216,9 +326,9 @@ async def rate_message(
     client = get_user_client(user.token)
     try:
         # The database policy ensures they can only update messages in their own chats
-        res = client.table("messages").update({
+        res = await run_db(client.table("messages").update({
             "rating": request.rating
-        }).eq("id", message_id).execute()
+        }).eq("id", message_id).execute)
 
         if not res.data:
             raise HTTPException(status_code=404, detail="Message not found or access denied")
@@ -255,11 +365,11 @@ async def list_chats(
     try:
         client = get_user_client(user.token)
         result = (
-            client.table("chats")
+            await run_db(client.table("chats")
             .select("id, title, created_at, updated_at")
             .eq("user_id", user.user_id)
             .order("updated_at", desc=True)
-            .execute()
+            .execute)
         )
 
         chats = [
@@ -291,12 +401,12 @@ async def create_chat(
     try:
         client = get_user_client(user.token)
         result = (
-            client.table("chats")
+            await run_db(client.table("chats")
             .insert({
                 "user_id": user.user_id,
                 "title": request.title or "Bagong Usapan",
             })
-            .execute()
+            .execute)
         )
 
         chat = result.data[0]
@@ -327,11 +437,11 @@ async def get_chat_messages(
         client = get_user_client(user.token)
         # Verify chat belongs to user
         chat_check = (
-            client.table("chats")
+            await run_db(client.table("chats")
             .select("id")
             .eq("id", chat_id)
             .eq("user_id", user.user_id)
-            .execute()
+            .execute)
         )
 
         if not chat_check.data:
@@ -342,11 +452,11 @@ async def get_chat_messages(
 
         # Fetch messages
         result = (
-            client.table("messages")
-            .select("id, role, content, created_at")
+            await run_db(client.table("messages")
+            .select("id, role, content, created_at, rating, sources")
             .eq("chat_id", chat_id)
             .order("created_at", desc=False)
-            .execute()
+            .execute)
         )
 
         messages = [
@@ -355,6 +465,8 @@ async def get_chat_messages(
                 role=msg["role"],
                 content=msg["content"],
                 created_at=msg["created_at"],
+                rating=msg.get("rating"),
+                sources=msg.get("sources") or [],
             )
             for msg in (result.data or [])
         ]
@@ -383,23 +495,23 @@ async def delete_user_account(
         client = get_user_client(user.token)
 
         # 1. Purge all user chat sessions (messages cascade automatically)
-        client.table("chats").delete().eq("user_id", user.user_id).execute()
+        await run_db(client.table("chats").delete().eq("user_id", user.user_id).execute)
 
         # 2. Delete user profile record
-        client.table("profiles").delete().eq("id", user.user_id).execute()
+        await run_db(client.table("profiles").delete().eq("id", user.user_id).execute)
 
         # 3. Delete user's avatar from storage if exists
         try:
-            files = client.storage.from_("avatars").list(prefix=user.user_id)
+            files = await run_db(client.storage.from_("avatars").list, prefix=user.user_id)
             if files:
                 file_names = [f["name"] for f in files]
-                client.storage.from_("avatars").remove(file_names)
+                await run_db(client.storage.from_("avatars").remove, file_names)
         except Exception as storage_err:
             logger.warning(f"Could not purge storage avatar for user {user.user_id}: {storage_err}")
 
         # 4. If Supabase admin RPC or admin delete is available, delete auth user
         try:
-            client.rpc("delete_user").execute()
+            await run_db(client.rpc("delete_user").execute)
         except Exception:
             pass
 
@@ -426,11 +538,11 @@ async def delete_chat(
         client = get_user_client(user.token)
         # Verify chat belongs to user
         chat_check = (
-            client.table("chats")
+            await run_db(client.table("chats")
             .select("id")
             .eq("id", chat_id)
             .eq("user_id", user.user_id)
-            .execute()
+            .execute)
         )
 
         if not chat_check.data:
@@ -440,7 +552,7 @@ async def delete_chat(
             )
 
         # Delete the chat (messages cascade automatically)
-        client.table("chats").delete().eq("id", chat_id).execute()
+        await run_db(client.table("chats").delete().eq("id", chat_id).execute)
 
         return {"detail": "Chat deleted successfully."}
 
@@ -463,7 +575,7 @@ async def delete_all_chats(
         client = get_user_client(user.token)
         # Delete all chats for this user (messages cascade)
         # The RLS policy also enforces the user_id
-        client.table("chats").delete().eq("user_id", user.user_id).execute()
+        await run_db(client.table("chats").delete().eq("user_id", user.user_id).execute)
 
         return {"detail": "All chats deleted successfully."}
 
@@ -476,7 +588,9 @@ async def delete_all_chats(
 
 
 @router.post("/chat/analyze-file", response_model=FileAnalysisResponse)
+@idempotent
 async def analyze_uploaded_file(
+    request_id: str | None = Form(None),
     file: UploadFile = File(..., description="Image or PDF file to analyze"),
     chat_id: str | None = Form(None, description="Existing chat ID (UUID)"),
     user_prompt: str | None = Form(None, description="Optional additional question about the file"),
@@ -496,7 +610,7 @@ async def analyze_uploaded_file(
         )
 
     # ── Read and validate file size ───────────────────────────
-    file_bytes = await file.read()
+    file_bytes = await file.read(MAX_FILE_SIZE_BYTES + 1)
     if len(file_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -509,7 +623,20 @@ async def analyze_uploaded_file(
             detail="The uploaded file is empty.",
         )
 
-    filename = file.filename or "uploaded_file"
+    # ── Verify real file type via magic bytes (blocks MIME spoofing) ──
+    detected_type = _detect_mime_from_bytes(file_bytes)
+    if detected_type is None or detected_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match a supported image or PDF format.",
+        )
+    if detected_type != content_type:
+        logger.info(
+            f"Upload content-type mismatch: claimed={content_type} detected={detected_type}; using detected."
+        )
+    content_type = detected_type
+
+    filename = _sanitize_filename(file.filename)
 
     # ── Validate chat_id if provided ─────────────────────────
     if chat_id:
@@ -521,52 +648,49 @@ async def analyze_uploaded_file(
         # ── Create or verify chat session ─────────────────────
         is_new_chat = False
         if not chat_id:
+            title = "📎 Analyzing Document..."
             chat_result = (
-                client.table("chats")
+                await run_db(client.table("chats")
                 .insert({
                     "user_id": user.user_id,
-                    "title": "📎 Analyzing Document...",
+                    "title": title,
                 })
-                .execute()
+                .execute)
             )
             chat_id = chat_result.data[0]["id"]
             previous_messages = []
             is_new_chat = True
         else:
-            # Verify chat belongs to this user
+            # Verify chat belongs to this user and fetch title in one query
             chat_check = (
-                client.table("chats")
-                .select("id, user_id")
+                await run_db(client.table("chats")
+                .select("id, user_id, title")
                 .eq("id", chat_id)
                 .eq("user_id", user.user_id)
-                .execute()
+                .execute)
             )
             if not chat_check.data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Chat not found or access denied.",
                 )
+            title = chat_check.data[0].get("title") or f"📎 {filename}"
 
             # Fetch existing messages for context
             messages_result = (
-                client.table("messages")
+                await run_db(client.table("messages")
                 .select("role, content")
                 .eq("chat_id", chat_id)
-                .order("created_at", desc=False)
-                .execute()
+                .order("created_at", desc=True)
+                .limit(12)
+                .execute)
             )
-            previous_messages = messages_result.data or []
+            previous_messages = list(reversed(messages_result.data or []))
 
-        # ── Store the user's file upload message ─────────────
+        # ── Prepare the user's file upload message ────────────
         user_content = f"📎 Uploaded: {filename}"
         if user_prompt:
             user_content += f"\n\n{user_prompt}"
-
-        client.table("messages").insert({
-            "chat_id": chat_id,
-            "role": "user",
-            "content": user_content,
-        }).execute()
 
         # ── Analyze file with DeepSeek ─────────────────────────
         logger.info(
@@ -574,7 +698,7 @@ async def analyze_uploaded_file(
             f"for user={user.user_id}"
         )
 
-        ai_response = await analyze_file_content(
+        analysis = await analyze_document(
             file_bytes=file_bytes,
             mime_type=content_type,
             filename=filename,
@@ -582,57 +706,35 @@ async def analyze_uploaded_file(
             user_prompt=user_prompt or "",
         )
 
-        # ── Determine if legal document from response ────────
-        is_legal = not any(
-            phrase in ai_response.lower()
-            for phrase in [
-                "does not appear to be a legal document",
-                "does not appear to be related to law",
-                "legal materials only",
-                "not a legal document",
-                "this is not a legal",
-                "foreign legal document",
-                "outside philippine jurisdiction",
-            ]
-        )
+        ai_response = analysis["answer"]
 
-        # ── Store the AI response ────────────────────────────
-        ai_res = client.table("messages").insert({
-            "chat_id": chat_id,
-            "role": "assistant",
-            "content": ai_response,
-        }).execute()
-        message_id = ai_res.data[0]["id"] if hasattr(ai_res, "data") and ai_res.data else ""
-
-        # Update the chat's updated_at timestamp (and title if new chat)
-        update_data = {"updated_at": "now()"}
+        # ── Batch-store user + assistant turns and update chat ─
+        extra_updates: dict[str, str] = {}
         if is_new_chat:
             if user_prompt:
                 new_title = await generate_chat_title(user_prompt)
             else:
                 new_title = await generate_chat_title(ai_response[:300])
-            update_data["title"] = f"📎 {new_title}"
+            title = f"📎 {new_title}"
+            extra_updates["title"] = title
 
-        client.table("chats").update(update_data).eq("id", chat_id).execute()
-
-        # Get the chat title
-        chat_data = (
-            client.table("chats")
-            .select("title")
-            .eq("id", chat_id)
-            .execute()
-        )
-        title = chat_data.data[0]["title"] if chat_data.data else f"📎 {filename}"
+        message_id = await run_db(_save_chat_turn, client, chat_id, user_content, ai_response, extra_updates, payload={"response": ai_response, "title": title, "sources": analysis["sources"], "is_legal_document": analysis["is_legal_document"], "reading_warnings": analysis["reading_warnings"], "page_count": analysis["page_count"]})
 
         return FileAnalysisResponse(
             chat_id=chat_id,
             message_id=message_id,
             response=ai_response,
             title=title,
-            sources=[],
-            is_legal_document=is_legal,
+            sources=[LawSource(**source) for source in analysis["sources"]],
+            is_legal_document=analysis["is_legal_document"],
+            reading_warnings=analysis["reading_warnings"],
+            page_count=analysis["page_count"],
         )
 
+    except DocumentInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DocumentProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:

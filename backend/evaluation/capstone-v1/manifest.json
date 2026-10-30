@@ -1,0 +1,46 @@
+{
+  "version": "capstone-v1",
+  "frozen_at": "2026-10-27T01:40:52.049936+00:00",
+  "dataset_sha256": "7bab83dd893f25c783ea6ba0748a38c9ed7a214e7009b1ac6a6a4b37b711404e",
+  "total": 36,
+  "language_counts": {
+    "en": 12,
+    "fil": 12,
+    "taglish": 12
+  },
+  "category_counts": {
+    "source_answer": 18,
+    "followup": 6,
+    "clarify": 4,
+    "abstain": 4,
+    "refuse": 4
+  },
+  "family_count": 18,
+  "reference_status": "unreviewed assistant drafts",
+  "official_source_checked_date": "2026-10-27",
+  "source_scope": "Named statutory text; no comprehensive amendment/current-applicability review",
+  "source_documents": [
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/3888",
+      "corpus_sha256": "825a56ad80d43ddc6b8ebf7a00cc4c15442ce445376e8526b760ed9aec5483df"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/86355",
+      "corpus_sha256": "29c55925c6edc3a5d851c7b1fdd23b37c2f5628d41c1af3ff866f1a9f64b3646"
+    },
+    {
+      "url": "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/78458",
+      "corpus_sha256": "5e55c75191f64d9a078cd0522e2e9a8c2bea0b6afe3ed428b4a69e9fd9ef3ee7"
+    }
+  ],
+  "development_dataset_sha256": {
+    "starter.jsonl": "de8b5acf3f1c58902b4db63f8d701b4f05f5cba09f9199bd0ded64c46f0ce9a5",
+    "generated-50.jsonl": "87ab178d9c045f6f37a2e7f90ccfcdea7e71830dbf2927a40d3df8f3e655e074"
+  },
+  "overlap_checks": {
+    "exact_question_overlap": 0,
+    "generated_50_source_document_overlap": 0,
+    "semantic_independence": "not established; broad topics may overlap previous development work"
+  },
+  "protocol": "Freeze before first app run. Do not tune the app, prompts, retrieval or labels against these results. Any later optimization makes this set development data. Reviewer corrections require a separately versioned key and disclosure."
+}

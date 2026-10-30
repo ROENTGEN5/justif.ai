@@ -1,3 +1,4 @@
+import { clearConversationCaches } from "./conversationCache";
 /**
  * Authentication Context & Provider
  * Manages Supabase auth state across the app.
@@ -88,6 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isRegisteringRef = useRef(false);
+
   // Listen for auth state changes
   useEffect(() => {
     let isMounted = true;
@@ -95,13 +98,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log("[AuthProvider] Starting auth init...");
 
     // Safety timeout — if auth takes too long, stop loading anyway
-    // (15s to accommodate slower mobile networks)
+    // (Reduced from 15s to 3s so the user never gets stuck on a long loading screen)
     const timeout = setTimeout(() => {
       console.warn("[AuthProvider] TIMEOUT fired — forcing isLoading to false");
       if (isMounted) {
         setIsLoading(false);
       }
-    }, 15000);
+    }, 3000);
 
     // Get initial session
     console.log("[AuthProvider] Calling getSession()...");
@@ -126,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === "SIGNED_OUT") setTimeout(() => { void clearConversationCaches(); }, 0);
       console.log("[AuthProvider] onAuthStateChange:", _event, "session:", !!session);
       if (isMounted) {
         // If we are artificially signing out immediately after registration to prevent auto-login,
@@ -150,7 +154,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const isRegisteringRef = useRef(false);
 
   // Sign in with email/password
   const signIn = useCallback(async (email: string, password: string) => {
@@ -282,7 +285,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Ignore Google sign-out errors (e.g. user was not logged into Google)
           }
 
+          await clearConversationCaches();
           const { error } = await supabase.auth.signOut();
+          await clearConversationCaches();
           if (error) {
             Alert.alert("Error", error.message);
           }

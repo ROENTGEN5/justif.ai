@@ -4,10 +4,12 @@ __pycache__/
 *.pyo
 venv/
 .venv/
+.venv-ragas/
 
 # Environment
 .env
 .env.local
+evaluation/runs/
 
 # IDE
 .vscode/
@@ -21,3 +23,4 @@ Thumbs.db
 data/final_clean_laws.csv
 data/faiss_index.bin
 data/chunks_metadata.pkl
+data/corpus-update-*/

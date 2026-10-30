@@ -12,6 +12,7 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import settings
+from app.services.database_io import run_db
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,10 @@ async def get_current_user(
         header = jwt.get_unverified_header(token)
         alg = header.get("alg", "")
         kid = header.get("kid")
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Malformed token: {e}",
+            detail="Malformed token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -84,23 +85,16 @@ async def get_current_user(
         # ── ES256 / asymmetric: use JWKS public key ──────────
         if alg.startswith("ES") or alg.startswith("RS") or alg.startswith("PS"):
             jwks = get_jwks_client()
-            signing_key = jwks.get_signing_key_from_jwt(token)
+            signing_key = await run_db(jwks.get_signing_key_from_jwt, token)
 
-            # Try with audience, fall back without
-            try:
-                payload = jwt.decode(
-                    token,
-                    signing_key.key,
-                    algorithms=[alg],
-                    audience="authenticated",
-                )
-            except jwt.InvalidAudienceError:
-                payload = jwt.decode(
-                    token,
-                    signing_key.key,
-                    algorithms=[alg],
-                    options={"verify_aud": False},
-                )
+            # Audience is always enforced: Supabase user access tokens carry
+            # aud="authenticated". No fallback without audience verification.
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                audience="authenticated",
+            )
 
             user = _extract_user(payload, token)
             logger.info(f"Auth OK (JWKS/{alg}): user={user.user_id} token=...{token[-8:]}")
@@ -135,20 +129,6 @@ async def get_current_user(
                     user = _extract_user(payload, token)
                     logger.info(f"Auth OK (HMAC): user={user.user_id} token=...{token[-8:]}")
                     return user
-                except jwt.InvalidAudienceError:
-                    # Retry without audience
-                    try:
-                        payload = jwt.decode(
-                            token,
-                            secret_bytes,
-                            algorithms=["HS256", "HS384", "HS512"],
-                            options={"verify_aud": False},
-                        )
-                        user = _extract_user(payload, token)
-                        logger.info(f"Auth OK (HMAC/no-aud): user={user.user_id} token=...{token[-8:]}")
-                        return user
-                    except jwt.InvalidTokenError as e:
-                        last_error = e
                 except jwt.InvalidTokenError as e:
                     last_error = e
 

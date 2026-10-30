@@ -15,10 +15,10 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Image,
 } from "react-native";
+import { Image } from "expo-image";
 import { Link } from "expo-router";
-import Strings from "../../constants/Strings";
+import { Strings } from "../../constants/Strings";
 import { useAuth } from "../../lib/auth";
 import { useTheme } from "../../lib/theme";
 
@@ -84,7 +84,7 @@ export default function LoginScreen() {
                 borderRadius: 20,
                 marginBottom: 12,
               }}
-              resizeMode="cover"
+              contentFit="cover"
             />
             <Text
               style={{
@@ -217,7 +217,12 @@ export default function LoginScreen() {
                     color: theme.inputText,
                   }}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
                     {showPassword ? Strings.hide : Strings.show}
                   </Text>
@@ -323,7 +328,7 @@ export default function LoginScreen() {
                   <Image
                     source={{ uri: "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" }}
                     style={{ width: 20, height: 20 }}
-                    resizeMode="contain"
+                    contentFit="contain"
                   />
                   <Text
                     style={{
