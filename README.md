@@ -82,6 +82,7 @@ Update the constants with your Supabase credentials, or use environment variable
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - `EXPO_PUBLIC_API_URL` (production API URL)
+- `EXPO_PUBLIC_APP_DOWNLOAD_URL` (optional Expo install page included in shared responses; defaults to the published Android build)
 
 ---
 

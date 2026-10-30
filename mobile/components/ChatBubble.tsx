@@ -32,6 +32,10 @@ import { useTheme } from "../lib/theme";
 import { singleLine } from "../lib/textFix";
 import { useTypewriter } from "../hooks/useTypewriter";
 
+const APP_DOWNLOAD_URL =
+  process.env.EXPO_PUBLIC_APP_DOWNLOAD_URL ||
+  "https://expo.dev/accounts/roentgen/projects/justifai/builds/36b74898-0f9c-41f6-9b45-52155419508b";
+
 const parseActionCards = (text: string) => {
   // Regex to match lines like `* **[Key]**: [Value]` or `  + **[Key]**: [Value]`
   const pattern = /^\s*(?:\*|-|\+)\s+\*\*([^*]+)\*\*:\s+(.+)$/gm;
@@ -399,7 +403,7 @@ function ChatBubble({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     try {
       await Share.share({
-        message: `${content}\n\n— Shared via Justif.ai`,
+        message: `${content}\n\n— Shared via the Justif AI app\nDownload for Android: ${APP_DOWNLOAD_URL}`,
       });
     } catch {
       // Ignore share cancellation
