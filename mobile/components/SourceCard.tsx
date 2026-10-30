@@ -4,7 +4,7 @@
  * official record verification indicators, and an in-app Legal Source Explorer bottom sheet.
  */
 
-import React, { useState } from "react";
+import React, { useState, useImperativeHandle, ForwardedRef } from "react";
 import {
   ScrollView,
   View,
@@ -20,8 +20,12 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../lib/theme";
-import { Strings } from "../constants/Strings";
 import { LawSource } from "../lib/api";
+import { citationNumber, findCitation, compactCitations, splitCitations } from "../lib/citations";
+
+export interface SourceCardHandle {
+  openCitation: (number: number) => void;
+}
 
 interface SourceCardProps {
   sources: LawSource[];
@@ -145,12 +149,23 @@ interface SelectedSourceItem {
   badgeStyle: BadgeStyle;
 }
 
-function SourceCard({ sources, answer = "" }: SourceCardProps) {
+function SourceCard({ sources, answer = "" }: SourceCardProps, ref: ForwardedRef<SourceCardHandle>) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedItem, setSelectedItem] = useState<SelectedSourceItem | null>(null);
   const { theme, mode } = useTheme();
   const insets = useSafeAreaInsets();
   const isDark = mode === "dark" || mode === "night";
+
+  useImperativeHandle(ref, () => ({
+    openCitation(number) {
+      const source = findCitation(sources, number);
+      if (!source) return;
+      const rawType = source.law_type || source.label || "LAW";
+      const code = lawTypeLabels[rawType] || lawTypeLabels[source.label] || rawType.slice(0, 3).toUpperCase();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setSelectedItem({ source, code, badgeStyle: getAuthorityBadgeStyle(code, isDark) });
+    },
+  }), [sources, isDark]);
 
   if (!sources || sources.length === 0) return null;
 
@@ -194,7 +209,7 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
         <TouchableOpacity
           onPress={handleToggle}
           accessibilityRole="button"
-          accessibilityLabel={`Relevant legal sources (${sources.length}). ${isExpanded ? "Collapse" : "Expand"}`}
+          accessibilityLabel={`Legal sources (${sources.length}). ${isExpanded ? "Collapse" : "Expand"}`}
           accessibilityState={{ expanded: isExpanded }}
           activeOpacity={0.7}
           style={{
@@ -218,7 +233,7 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
                 letterSpacing: 0.3,
               }}
             >
-              {Strings.sources} ({sources.length})
+              Legal sources ({sources.length})
             </Text>
 
             {/* Official Legal Record Verified Pill */}
@@ -275,7 +290,7 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
                   activeOpacity={0.7}
                   onPress={() => handleSelectSource(source, code, badgeStyle)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Inspect legal source ${index + 1}: ${source.short_title || source.full_title || "Untitled Legal Source"}`}
+                  accessibilityLabel={`Inspect legal source ${citationNumber(source, index)}: ${source.short_title || source.full_title || "Untitled Legal Source"}`}
                   accessibilityHint="Opens legal source excerpt and details"
                   style={{
                     flexDirection: "row",
@@ -322,7 +337,7 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
                         lineHeight: 18,
                       }}
                     >
-                      {source.short_title || source.full_title || "Untitled Legal Source"}
+                      [{citationNumber(source, index)}] {source.short_title || source.full_title || "Untitled Legal Source"}
                     </Text>
 
                     <View
@@ -585,13 +600,13 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
 
               <ScrollView nestedScrollEnabled style={{maxHeight: 230, marginBottom: 12}}>
                 <Text style={{color: theme.accent, fontWeight: "700"}}>
-                  [Source {selectedItem.source.citation_number || sources.indexOf(selectedItem.source) + 1}] {selectedItem.source.section?.trim() || "Retrieved passage"}
+                  [{citationNumber(selectedItem.source, sources.indexOf(selectedItem.source))}] {selectedItem.source.section?.trim() || "Retrieved passage"}
                 </Text>
                 <Text style={{color: theme.textSecondary, marginVertical: 6}}>
                   Retrieved evidence. Claim support and current legal status have not been independently verified.
                 </Text>
-                {answer.split(/\n/).filter(line => line.includes(`[Source ${selectedItem.source.citation_number || sources.indexOf(selectedItem.source) + 1}]`)).map((claim, index) => (
-                  <Text key={`claim-${index}`} selectable style={{color: theme.text, marginBottom: 8}}>Citing passage: {claim}</Text>
+                {answer.split(/\n/).filter(line => splitCitations(line).some(part => part.number === citationNumber(selectedItem.source, sources.indexOf(selectedItem.source)))).map((claim, index) => (
+                  <Text key={`claim-${index}`} selectable style={{color: theme.text, marginBottom: 8}}>Citing passage: {compactCitations(claim)}</Text>
                 ))}
                 {(selectedItem.source.excerpts || []).map((excerpt, index) => (
                   <Text key={index} selectable style={{color: theme.text, marginBottom: 12, lineHeight: 21}}>{excerpt}</Text>
@@ -717,4 +732,4 @@ function SourceCard({ sources, answer = "" }: SourceCardProps) {
   );
 }
 
-export default React.memo(SourceCard);
+export default React.memo(React.forwardRef(SourceCard));

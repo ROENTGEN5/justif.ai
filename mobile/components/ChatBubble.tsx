@@ -7,7 +7,7 @@
  * long-press contextual action sheet, one-tap copy/share utilities, and tactile haptic feedback.
  */
 
-import React, { useState, useEffect, useMemo, useDeferredValue } from "react";
+import React, { useState, useEffect, useMemo, useDeferredValue, useCallback } from "react";
 import {
   View,
   Text,
@@ -25,8 +25,9 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import * as Speech from "expo-speech";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Markdown from "react-native-markdown-display";
+import Markdown, { RenderRules } from "react-native-markdown-display";
 import { reportCitation, LawSource } from "../lib/api";
+import { compactCitations, findCitation, splitCitations } from "../lib/citations";
 import { useTheme } from "../lib/theme";
 import { useTypewriter } from "../hooks/useTypewriter";
 
@@ -166,6 +167,7 @@ export interface ChatBubbleProps {
   onRate?: (id: string, rating: "like" | "unlike") => void;
   /** Callback to populate ChatInput with a follow-up quote */
   onAskFollowUp?: (snippet: string) => void;
+  onCitationPress?: (number: number) => void;
   /** Whether to progressively type out this message word-by-word */
   animateTyping?: boolean;
   /** Whether tokens are still actively streaming from the server */
@@ -185,6 +187,7 @@ function ChatBubble({
   rating,
   onRate,
   onAskFollowUp,
+  onCitationPress,
   animateTyping = false,
   isStreaming = false,
   onTypingTick,
@@ -209,6 +212,48 @@ function ChatBubble({
 
   const activeTyping = !isUser && (isTyping || isStreaming);
   const deferredContent = useDeferredValue(content);
+
+  const renderCitationText = useCallback((text: string, key: string) =>
+    splitCitations(text).map((part, index) => {
+      const number = part.number;
+      if (number === undefined) return part.text;
+      const source = findCitation(sources || [], number);
+      const canOpen = Boolean(source && onCitationPress);
+      return (
+        <Text
+          key={`${key}-citation-${index}`}
+          accessibilityRole={canOpen ? "button" : "text"}
+          accessibilityLabel={source
+            ? `Legal source ${number}: ${source.short_title || source.full_title || "Philippine law"}`
+            : `Legal source ${number}, saved details unavailable`}
+          accessibilityHint={canOpen ? "Opens the law, supporting excerpt, and official link" : undefined}
+          onPress={canOpen ? (event) => {
+            event.stopPropagation();
+            onCitationPress?.(number);
+          } : undefined}
+          style={{
+            fontSize: 13,
+            fontWeight: "800",
+            color: canOpen ? theme.accent : theme.textSecondary,
+            backgroundColor: theme.surfaceElevated,
+            borderRadius: 5,
+            lineHeight: 22,
+          }}
+        >
+          {`\u00a0[${number}]\u00a0`}
+        </Text>
+      );
+    }), [sources, onCitationPress, theme]);
+
+  const citationRules = useMemo<RenderRules>(() => ({
+    text: (node, _children, parents, styles, inheritedStyles = {}) => (
+      <Text key={node.key} style={[inheritedStyles, styles.text]}>
+        {parents.some(parent => parent.type === "link")
+          ? node.content
+          : renderCitationText(node.content, node.key)}
+      </Text>
+    ),
+  }), [renderCitationText]);
 
   // Stop speech on unmount
   useEffect(() => {
@@ -543,7 +588,7 @@ function ChatBubble({
                 color: theme.assistantBubbleText,
               }}
             >
-              {displayedText}
+              {compactCitations(displayedText)}
               <Text style={{ color: theme.accent, fontWeight: "900" }}> ▊</Text>
             </Text>
           </View>
@@ -578,7 +623,7 @@ function ChatBubble({
             {parsedComponents.map((chunk, index) => {
               if (chunk.type === "markdown") {
                 return (
-                  <Markdown key={index} style={markdownStyle}>
+                  <Markdown key={index} style={markdownStyle} rules={citationRules}>
                     {chunk.content}
                   </Markdown>
                 );
@@ -599,59 +644,12 @@ function ChatBubble({
                       {chunk.key}
                     </Text>
                     <Text style={{ color: theme.assistantBubbleText, fontSize: 14, lineHeight: 20 }}>
-                      {chunk.value}
+                      {renderCitationText(chunk.value, `action-${index}`)}
                     </Text>
                   </View>
                 );
               }
             })}
-
-            {/* Section 2: Relevant Sources Inline Summary (when sources are attached) */}
-            {sources && sources.length > 0 && (
-              <View
-                style={{
-                  backgroundColor: theme.surfaceElevated,
-                  borderRadius: 12,
-                  padding: 10,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  marginTop: 2,
-                  gap: 4,
-                }}
-              >
-                <View
-                  accessibilityRole="header"
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <Ionicons name="library-outline" size={13} color={theme.accent} />
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "800",
-                      color: theme.accent,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    Relevant Sources ({sources.length})
-                  </Text>
-                </View>
-                {sources.slice(0, 3).map((src, idx) => (
-                  <Text
-                    key={idx}
-                    style={{
-                      fontSize: 12,
-                      color: theme.textSecondary,
-                      lineHeight: 17,
-                    }}
-                  >
-                    • [Source {src.citation_number || idx + 1}]{" "}
-                    {src.short_title || src.full_title || "Philippine Law"}
-                    {src.section ? ` (${src.section})` : ""}
-                  </Text>
-                ))}
-              </View>
-            )}
 
             {/* Section 3: Practical Next Steps */}
             {hasSubstantiveStructure && (
@@ -684,7 +682,7 @@ function ChatBubble({
                   </Text>
                 </View>
                 {nextStepsText ? (
-                  <Markdown style={markdownStyle}>{nextStepsText}</Markdown>
+                  <Markdown style={markdownStyle} rules={citationRules}>{nextStepsText}</Markdown>
                 ) : (
                   <Text
                     style={{
@@ -693,7 +691,7 @@ function ChatBubble({
                       color: theme.textSecondary,
                     }}
                   >
-                    1. Review the cited provisions in the Sources card below to verify exact conditions and exceptions.{"\n"}
+                    1. Review the cited provisions in Legal sources below to verify exact conditions and exceptions.{"\n"}
                     2. Gather relevant dates, written notices, or contracts before taking formal action.{"\n"}
                     3. Tap &ldquo;Ask Follow-up&rdquo; below if you want to check filing deadlines, remedies, or agency procedures.
                   </Text>
@@ -1127,6 +1125,7 @@ export default React.memo(ChatBubble, (prev, next) => {
     prev.sources === next.sources &&
     prev.onRate === next.onRate &&
     prev.onAskFollowUp === next.onAskFollowUp &&
+    prev.onCitationPress === next.onCitationPress &&
     prev.animateTyping === next.animateTyping &&
     prev.isStreaming === next.isStreaming
   );

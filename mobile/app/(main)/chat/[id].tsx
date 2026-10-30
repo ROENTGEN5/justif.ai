@@ -25,7 +25,7 @@ import { useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { Strings } from "../../../constants/Strings";
-import ChatBubble from "../../../components/ChatBubble";
+import ChatMessage from "../../../components/ChatMessage";
 import ChatInput from "../../../components/ChatInput";
 import ChatSkeleton from "../../../components/ChatSkeleton";
 import FloatingScrollButton from "../../../components/FloatingScrollButton";
@@ -34,7 +34,6 @@ import {
   PreferredLanguage,
 } from "../../../components/GuidedTopicFlow";
 import LoadingDots from "../../../components/LoadingDots";
-import SourceCard from "../../../components/SourceCard";
 import FilterChips from "../../../components/FilterChips";
 import {
   newRequestId,
@@ -508,7 +507,7 @@ export default function ExistingChatScreen() {
   const renderItem = useCallback(
     ({ item }: { item: DisplayMessage }) => (
       <View>
-        <ChatBubble
+        <ChatMessage
           id={item.id}
           role={item.role}
           content={item.content}
@@ -522,13 +521,6 @@ export default function ExistingChatScreen() {
           onTypingTick={scrollToBottom}
           onTypingComplete={handleTypingComplete}
         />
-        {item.role === "assistant" &&
-          !item.animateTyping &&
-          !item.isStreaming &&
-          item.sources &&
-          item.sources.length > 0 && (
-            <SourceCard sources={item.sources} answer={item.content} />
-          )}
       </View>
     ),
     [handleRate, handleAskFollowUp, scrollToBottom, handleTypingComplete]
