@@ -1,0 +1,24 @@
+# EAS builds only the mobile app from this repository.
+/*
+!/mobile/
+!/.easignore
+
+node_modules/
+.expo/
+.vscode/
+.env
+.env.*
+*.log
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+play-store-key.json
+/mobile/android/
+/mobile/ios/
+/mobile/dist/
+/mobile/web-build/
+*.apk
+*.aab
