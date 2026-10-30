@@ -21,6 +21,7 @@ import httpx
 import ollama
 from pinecone import Pinecone
 from app.config import settings
+from app.services import cpu_embeddings
 from app.services.corpus_identity import chunk_id
 from app.services.relevance import lexical_scores
 from app.services.law_lookup import named_laws, law_filter
@@ -344,14 +345,16 @@ def _embed_via_nomic_api(texts: list[str], task_type: str = "search_query") -> l
 
 
 @lru_cache(maxsize=512)
-def _cached_embed_query(text: str, nomic_api_key: str) -> tuple[float, ...]:
+def _cached_embed_query(text: str, nomic_api_key: str, provider: str) -> tuple[float, ...]:
     """Internal LRU-cached query embedding helper returning an immutable tuple."""
-    if nomic_api_key:
-        try:
-            embeddings = _embed_via_nomic_api([text], task_type="search_query")
-            return tuple(embeddings[0])
-        except Exception as e:
-            logger.warning(f"Nomic Cloud API embedding failed, falling back to Ollama: {e}")
+    if provider in {"fastembed", "auto"}:
+        return tuple(cpu_embeddings.embed_texts([text], "search_query")[0])
+    if provider == "nomic":
+        if not nomic_api_key:
+            raise RuntimeError("NOMIC_API_KEY is required for the nomic provider")
+        return tuple(_embed_via_nomic_api([text], task_type="search_query")[0])
+    if provider != "local":
+        raise ValueError("EMBEDDING_PROVIDER must be fastembed, auto, local, or nomic")
 
     response = _ollama_client.embed(
         model=EMBEDDING_MODEL,
@@ -363,11 +366,11 @@ def _cached_embed_query(text: str, nomic_api_key: str) -> tuple[float, ...]:
 def embed_query(text: str) -> list[float]:
     """
     Embed a single query string into a 768-dim vector.
-    Uses Nomic Cloud API when NOMIC_API_KEY is set (for cloud deployments like Render),
-    and falls back to local Ollama nomic-embed-text.
+    Uses self-hosted CPU inference by default. Paid API calls are explicit opt-in.
     """
-    key = settings.NOMIC_API_KEY if settings.EMBEDDING_PROVIDER != "local" else ""
-    return list(_cached_embed_query(text, key or ""))
+    provider = settings.EMBEDDING_PROVIDER
+    key = settings.NOMIC_API_KEY if provider == "nomic" else ""
+    return list(_cached_embed_query(text, key or "", provider))
 
 
 embed_query.cache_clear = _cached_embed_query.cache_clear  # type: ignore[attr-defined]
@@ -377,13 +380,17 @@ embed_query.cache_info = _cached_embed_query.cache_info    # type: ignore[attr-d
 def embed_documents(texts: list[str]) -> list[list[float]]:
     """
     Embed a batch of document texts into 768-dim vectors.
-    Uses Nomic Cloud API when NOMIC_API_KEY is set, otherwise local Ollama.
+    Uses the selected provider without silently switching embedding services.
     """
-    if settings.NOMIC_API_KEY and settings.EMBEDDING_PROVIDER != "local":
-        try:
-            return _embed_via_nomic_api(texts, task_type="search_document")
-        except Exception as e:
-            logger.warning(f"Nomic Cloud API document embedding failed, falling back to Ollama: {e}")
+    provider = settings.EMBEDDING_PROVIDER
+    if provider in {"fastembed", "auto"}:
+        return cpu_embeddings.embed_texts(texts, "search_document")
+    if provider == "nomic":
+        if not settings.NOMIC_API_KEY:
+            raise RuntimeError("NOMIC_API_KEY is required for the nomic provider")
+        return _embed_via_nomic_api(texts, task_type="search_document")
+    if provider != "local":
+        raise ValueError("EMBEDDING_PROVIDER must be fastembed, auto, local, or nomic")
 
     prefixed = [f"search_document: {t}" for t in texts]
     response = _ollama_client.embed(
@@ -436,17 +443,19 @@ class RAGService:
             )
 
             # Check embedding provider availability
-            if settings.NOMIC_API_KEY and settings.EMBEDDING_PROVIDER != "local":
+            if settings.EMBEDDING_PROVIDER in {"fastembed", "auto"}:
+                cpu_embeddings.initialize()
+                logger.info("Using self-hosted quantized Nomic v1.5 CPU embeddings; no Nomic API calls")
+            elif settings.EMBEDDING_PROVIDER == "nomic":
+                # Exercise the configured provider: a key being present does
+                # not establish that it has usable quota.
+                embed_query("Legal information search")
                 logger.info(f"Using Nomic Cloud API ('{NOMIC_CLOUD_MODEL}') for query embeddings")
+            elif settings.EMBEDDING_PROVIDER == "local":
+                _ollama_client.show(EMBEDDING_MODEL)
+                logger.info(f"Ollama model '{EMBEDDING_MODEL}' is available locally")
             else:
-                try:
-                    _ollama_client.show(EMBEDDING_MODEL)
-                    logger.info(f"Ollama model '{EMBEDDING_MODEL}' is available locally")
-                except Exception as e:
-                    logger.warning(
-                        f"Neither NOMIC_API_KEY is set nor local Ollama model '{EMBEDDING_MODEL}' is reachable ({e}). "
-                        f"Set NOMIC_API_KEY for cloud deployment or run 'ollama pull {EMBEDDING_MODEL}' locally."
-                    )
+                raise ValueError("Unknown EMBEDDING_PROVIDER")
 
             self._loaded = True
             logger.info("RAG service initialized successfully.")

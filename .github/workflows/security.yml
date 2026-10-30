@@ -38,7 +38,7 @@ jobs:
           tests.test_response_planning tests.test_section_evidence
           tests.test_law_lookup tests.test_retrieval tests.test_evaluation
           tests.test_capstone_eval tests.test_stream_eval tests.test_performance
-          tests.test_corpus_identity tests.test_refresh_corpus
+          tests.test_corpus_identity tests.test_refresh_corpus tests.test_cpu_embeddings
           tests.test_versioned_index
 
   mobile-security:

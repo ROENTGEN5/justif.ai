@@ -181,3 +181,4 @@ class HealthResponse(BaseModel):
     service: str = "Justif.ai API"
     version: str = "1.0.0"
     rag_ready: bool = False
+    embedding_provider: str = ""

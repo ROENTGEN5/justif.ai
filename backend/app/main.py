@@ -14,7 +14,6 @@ from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
@@ -55,6 +54,23 @@ def _rate_limit_key(request: Request) -> str:
 
 
 limiter = Limiter(key_func=_rate_limit_key, default_limits=[settings.RATE_LIMIT])
+
+
+def _api_rate_budget():
+    """Stable scope for a user's API budget, independent of router internals."""
+
+
+class DefaultRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # New FastAPI versions can expose lazy router objects without endpoint
+        # attributes. SlowAPI's route discovery then silently exempts requests.
+        # Our global default budget does not need to inspect those objects.
+        if request.method != "OPTIONS" and request.url.path not in {"/", "/health", "/api/health"}:
+            try:
+                limiter._check_request_limit(request, _api_rate_budget, in_middleware=True)
+            except RateLimitExceeded as exc:
+                return _rate_limit_exceeded_handler(request, exc)
+        return await call_next(request)
 
 
 # ─── Security Headers Middleware ─────────────────────────────
@@ -124,7 +140,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Without this middleware, default_limits are never enforced.
-app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(DefaultRateLimitMiddleware)
 
 # ─── Security Headers Middleware ─────────────────────────────
 
@@ -156,21 +172,21 @@ app.include_router(chat_router)
 @limiter.exempt
 async def health_check():
     """Health check endpoint."""
-    return HealthResponse(rag_ready=rag_service.is_ready)
+    return HealthResponse(rag_ready=rag_service.is_ready, embedding_provider=settings.EMBEDDING_PROVIDER)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 @limiter.exempt
 async def root_health():
     """Root health check endpoint for cold-start warm-up pings."""
-    return HealthResponse(rag_ready=rag_service.is_ready)
+    return HealthResponse(rag_ready=rag_service.is_ready, embedding_provider=settings.EMBEDDING_PROVIDER)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
 @limiter.exempt
 async def api_health():
     """API health check endpoint."""
-    return HealthResponse(rag_ready=rag_service.is_ready)
+    return HealthResponse(rag_ready=rag_service.is_ready, embedding_provider=settings.EMBEDDING_PROVIDER)
 
 
 # ─── Run Server ──────────────────────────────────────────────

@@ -35,7 +35,9 @@ class Settings:
     # Embeddings: Nomic Cloud API (Production) & Ollama (Local Fallback)
     NOMIC_API_KEY: str = os.getenv("NOMIC_API_KEY", "")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "auto").lower()
+    # auto/fastembed run the open model on this server without Nomic API fees.
+    # Paid Nomic API use requires explicitly selecting "nomic".
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed").lower()
 
     # Vision Service for Document Photos (Google Gemini)
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")

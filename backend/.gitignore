@@ -5,6 +5,7 @@ __pycache__/
 venv/
 .venv/
 .venv-ragas/
+.cache/
 
 # Environment
 .env
