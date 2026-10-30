@@ -647,7 +647,7 @@ export default function ExistingChatScreen() {
           keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
           ListFooterComponent={
-            isLoading ? <LoadingDots stageText={thinkingStage} /> : null
+            isLoading ? <LoadingDots stageText={thinkingStage} /> : undefined
           }
           ListEmptyComponent={
             <View

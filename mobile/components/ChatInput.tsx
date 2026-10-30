@@ -63,7 +63,7 @@ export default function ChatInput({
   const [attachment, setAttachment] = useState<FileAttachment | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
 
   useEffect(() => {
     if (!prefillText) return;
