@@ -1,6 +1,7 @@
 # EAS builds only the mobile app from this repository.
 /*
-!/mobile/
+!/mobile
+!/mobile/**
 !/.easignore
 
 node_modules/
