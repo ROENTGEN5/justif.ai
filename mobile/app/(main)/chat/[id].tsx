@@ -49,7 +49,7 @@ import {
 } from "../../../lib/api";
 import { cacheOwner } from "../../../lib/conversationCache";
 import { useTheme } from "../../../lib/theme";
-import { singleLine } from "../../../lib/textFix";
+import { textFix } from "../../../lib/textFix";
 
 interface DisplayMessage {
   id: string;
@@ -562,19 +562,17 @@ export default function ExistingChatScreen() {
           accessibilityRole="radiogroup"
           accessibilityLabel="Response language selector"
           style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
+            flexDirection: "column",
+            alignItems: "stretch",
             paddingHorizontal: 14,
             paddingVertical: 6,
             borderBottomWidth: 1,
             borderBottomColor: theme.border,
             backgroundColor: theme.background,
-            flexWrap: "wrap",
             gap: 6,
           }}
         >
-          <Text {...singleLine} style={{ fontSize: 11, fontWeight: "600", color: theme.textTertiary }}>
+          <Text {...textFix} style={{ paddingHorizontal: 2, fontSize: 11, fontWeight: "600", color: theme.textTertiary }}>
             Language:
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -591,6 +589,9 @@ export default function ExistingChatScreen() {
                     setPreferredLanguage(option.id);
                   }}
                   style={{
+                    flexGrow: 1,
+                    flexBasis: 80,
+                    minWidth: 80,
                     paddingHorizontal: 10,
                     paddingVertical: 4,
                     minHeight: 28,
@@ -602,8 +603,10 @@ export default function ExistingChatScreen() {
                   }}
                 >
                   <Text
-                    {...singleLine}
+                    {...textFix}
                     style={{
+                      paddingHorizontal: 2,
+                      textAlign: "center",
                       fontSize: 11,
                       fontWeight: selected ? "700" : "500",
                       color: selected ? theme.chipActiveText : theme.chipText,

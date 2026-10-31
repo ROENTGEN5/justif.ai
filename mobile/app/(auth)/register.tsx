@@ -1,472 +1,52 @@
-/**
- * Register Screen
- * Minimalist registration form with gray/black/white aesthetic.
- * Supports email/password and Google Sign-Up.
- */
-
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
-import { Image } from "expo-image";
-import { Link, useRouter } from "expo-router";
-import { Strings } from "../../constants/Strings";
+import React, { useRef, useState } from "react";
+import { useRouter } from "expo-router";
+import { AuthButton, AuthField, AuthNotice, AuthScreen, AuthTextAction } from "../../components/AuthForm";
 import { useAuth } from "../../lib/auth";
-import { useTheme } from "../../lib/theme";
+import { authErrorMessage, emailError, passwordError } from "../../lib/authForms";
 
 export default function RegisterScreen() {
-  const { signUp, signInWithGoogle } = useAuth();
-  const { theme } = useTheme();
+  const { signUp } = useAuth();
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
-  const handleRegister = async () => {
-    if (!fullName.trim() || !email.trim() || !password) {
-      Alert.alert("Error", "Please fill in all fields.");
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match.");
-      return;
-    }
-
-    setIsLoading(true);
+  const register = async () => {
+    if (pending.current) return;
+    setSubmitted(true); setError("");
+    if (!name.trim() || emailError(email) || passwordError(password) || password !== confirmation) return;
+    pending.current = true; setBusy(true);
     try {
-      await signUp(email, password, fullName);
-      Alert.alert("Success!", Strings.successRegister, [
-        {
-          text: Strings.ok,
-          onPress: () => router.replace("/(auth)/login"),
-        },
-      ]);
-    } catch (error: any) {
-      Alert.alert("Error", error.message || Strings.errorRegister);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGoogleSignUp = async () => {
-    setIsGoogleLoading(true);
-    try {
-      await signInWithGoogle();
-    } catch (error: any) {
-      Alert.alert("Error", error.message || Strings.googleSignInError);
-    } finally {
-      setIsGoogleLoading(false);
-    }
+      const result = await signUp(email.trim(), password, name.trim());
+      setNeedsConfirmation(result.needsEmailConfirmation);
+      setPassword(""); setConfirmation(""); setSubmitted(false);
+      setSuccess(result.needsEmailConfirmation
+        ? "Check your email for a confirmation link. After confirming, return here and sign in. If you already have an account, try signing in or resetting your password."
+        : "Your account is ready. You can now sign in.");
+    } catch (cause) { setError(authErrorMessage(cause, "Unable to create an account. Try signing in if you already registered, or try again later.")); }
+    finally { pending.current = false; setBusy(false); }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={{
-            flexGrow: 1,
-            justifyContent: "center",
-            paddingHorizontal: 24,
-            paddingVertical: 40,
-          }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* ─── Logo Section ────────────────────────── */}
-          <View style={{ alignItems: "center", marginBottom: 32 }}>
-            <Image
-              source={require("../../assets/logo.png")}
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 16,
-                marginBottom: 12,
-              }}
-              contentFit="cover"
-            />
-            <Text
-              style={{
-                fontSize: 16,
-                fontWeight: "800",
-                color: theme.text,
-                letterSpacing: 0.5,
-              }}
-            >
-              Justif.ai
-            </Text>
-            <Text
-              style={{
-                fontSize: 12,
-                color: theme.textSecondary,
-                fontStyle: "italic",
-                marginTop: 4,
-              }}
-            >
-              {Strings.tagline}
-            </Text>
-          </View>
-
-          {/* ─── Welcome Text ────────────────────────── */}
-          <View style={{ marginBottom: 28 }}>
-            <Text
-              style={{
-                fontSize: 26,
-                fontWeight: "800",
-                color: theme.text,
-                textAlign: "center",
-              }}
-            >
-              {Strings.registerTitle}
-            </Text>
-            <Text
-              style={{
-                fontSize: 14,
-                color: theme.textSecondary,
-                textAlign: "center",
-                marginTop: 8,
-              }}
-            >
-              {Strings.registerSubtitle}
-            </Text>
-          </View>
-
-          {/* ─── Form Card ───────────────────────────── */}
-          <View
-            style={{
-              backgroundColor: theme.surfaceElevated,
-              borderRadius: 20,
-              padding: 24,
-              borderWidth: 1,
-              borderColor: theme.border,
-            }}
-          >
-            {/* Full Name */}
-            <View style={{ marginBottom: 14 }}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: theme.textSecondary,
-                  marginBottom: 8,
-                }}
-              >
-                {Strings.fullName}
-              </Text>
-              <View
-                style={{
-                  backgroundColor: theme.inputBg,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.inputBorder,
-                  paddingHorizontal: 16,
-                  paddingVertical: Platform.OS === "ios" ? 14 : 8,
-                }}
-              >
-                <TextInput
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="John Doe"
-                  placeholderTextColor={theme.inputPlaceholder}
-                  autoCapitalize="words"
-                  autoComplete="name"
-                  style={{
-                    fontSize: 16,
-                    color: theme.inputText,
-                  }}
-                />
-              </View>
-            </View>
-
-            {/* Email */}
-            <View style={{ marginBottom: 14 }}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: theme.textSecondary,
-                  marginBottom: 8,
-                }}
-              >
-                {Strings.email}
-              </Text>
-              <View
-                style={{
-                  backgroundColor: theme.inputBg,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.inputBorder,
-                  paddingHorizontal: 16,
-                  paddingVertical: Platform.OS === "ios" ? 14 : 8,
-                }}
-              >
-                <TextInput
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="email@example.com"
-                  placeholderTextColor={theme.inputPlaceholder}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  style={{
-                    fontSize: 16,
-                    color: theme.inputText,
-                  }}
-                />
-              </View>
-            </View>
-
-            {/* Password */}
-            <View style={{ marginBottom: 14 }}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: theme.textSecondary,
-                  marginBottom: 8,
-                }}
-              >
-                {Strings.password}
-              </Text>
-              <View
-                style={{
-                  backgroundColor: theme.inputBg,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.inputBorder,
-                  paddingHorizontal: 16,
-                  paddingVertical: Platform.OS === "ios" ? 14 : 8,
-                  flexDirection: "row",
-                  alignItems: "center",
-                }}
-              >
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="6+ characters"
-                  placeholderTextColor={theme.inputPlaceholder}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  style={{
-                    flex: 1,
-                    fontSize: 16,
-                    color: theme.inputText,
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  accessibilityRole="button"
-                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={{ color: theme.textTertiary, fontSize: 13 }}>
-                    {showPassword ? Strings.hide : Strings.show}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Confirm Password */}
-            <View style={{ marginBottom: 24 }}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: theme.textSecondary,
-                  marginBottom: 8,
-                }}
-              >
-                {Strings.confirmPassword}
-              </Text>
-              <View
-                style={{
-                  backgroundColor: theme.inputBg,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.inputBorder,
-                  paddingHorizontal: 16,
-                  paddingVertical: Platform.OS === "ios" ? 14 : 8,
-                }}
-              >
-                <TextInput
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  placeholder="Repeat password"
-                  placeholderTextColor={theme.inputPlaceholder}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  style={{
-                    fontSize: 16,
-                    color: theme.inputText,
-                  }}
-                />
-              </View>
-            </View>
-
-            {/* Register Button */}
-            <TouchableOpacity
-              onPress={handleRegister}
-              disabled={isLoading || isGoogleLoading}
-              activeOpacity={0.8}
-              style={{
-                backgroundColor: theme.accent,
-                paddingVertical: 16,
-                borderRadius: 14,
-                alignItems: "center",
-                opacity: isLoading ? 0.7 : 1,
-              }}
-            >
-              {isLoading ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <ActivityIndicator size="small" color={theme.accentText} />
-                  <Text
-                    style={{
-                      fontSize: 16,
-                      fontWeight: "700",
-                      color: theme.accentText,
-                    }}
-                  >
-                    {Strings.registering}
-                  </Text>
-                </View>
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontWeight: "700",
-                    color: theme.accentText,
-                  }}
-                >
-                  {Strings.register}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            {/* ─── Divider ─────────────────────────────── */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginVertical: 20,
-              }}
-            >
-              <View
-                style={{
-                  flex: 1,
-                  height: 1,
-                  backgroundColor: theme.border,
-                }}
-              />
-              <Text
-                style={{
-                  marginHorizontal: 12,
-                  fontSize: 12,
-                  color: theme.textTertiary,
-                  fontWeight: "500",
-                }}
-              >
-                {Strings.orContinueWith}
-              </Text>
-              <View
-                style={{
-                  flex: 1,
-                  height: 1,
-                  backgroundColor: theme.border,
-                }}
-              />
-            </View>
-
-            {/* ─── Google Sign-Up Button ────────────────── */}
-            <TouchableOpacity
-              onPress={handleGoogleSignUp}
-              disabled={isLoading || isGoogleLoading}
-              activeOpacity={0.8}
-              style={{
-                backgroundColor: theme.inputBg,
-                paddingVertical: 14,
-                borderRadius: 14,
-                alignItems: "center",
-                justifyContent: "center",
-                flexDirection: "row",
-                gap: 10,
-                borderWidth: 1,
-                borderColor: theme.inputBorder,
-                opacity: isGoogleLoading ? 0.7 : 1,
-              }}
-            >
-              {isGoogleLoading ? (
-                <ActivityIndicator size="small" color={theme.textSecondary} />
-              ) : (
-                <>
-                  <Image
-                    source={{ uri: "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" }}
-                    style={{ width: 20, height: 20 }}
-                    contentFit="contain"
-                  />
-                  <Text
-                    style={{
-                      fontSize: 15,
-                      fontWeight: "600",
-                      color: theme.text,
-                    }}
-                  >
-                    {Strings.googleSignUp}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* ─── Login Link ──────────────────────────── */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "center",
-              alignItems: "center",
-              marginTop: 24,
-              gap: 4,
-            }}
-          >
-            <Text style={{ fontSize: 14, color: theme.textSecondary }}>
-              {Strings.hasAccount}
-            </Text>
-            <Link href="/(auth)/login" asChild>
-              <TouchableOpacity>
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: "700",
-                    color: theme.text,
-                    textDecorationLine: "underline",
-                  }}
-                >
-                  {Strings.login}
-                </Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+    <AuthScreen title={success ? "Next step" : "Create an account"} subtitle="Save your conversations and ask about Philippine law.">
+      {success ? <AuthNotice text={success} /> : <>
+        <AuthField label="Full name" value={name} onChangeText={setName} placeholder="Your full name" autoCapitalize="words" autoComplete="name" textContentType="name" editable={!busy} error={submitted && !name.trim() ? "Enter your name." : undefined} />
+        <AuthField label="Email" value={email} onChangeText={setEmail} placeholder="email@example.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" editable={!busy} error={submitted ? emailError(email) : undefined} />
+        <AuthField label="Password" password value={password} onChangeText={setPassword} autoCapitalize="none" autoComplete="new-password" textContentType="newPassword" editable={!busy} hint="Use at least 8 characters. A longer, unique passphrase is better." error={submitted ? passwordError(password) : undefined} />
+        <AuthField label="Confirm password" password value={confirmation} onChangeText={setConfirmation} autoCapitalize="none" autoComplete="new-password" textContentType="newPassword" returnKeyType="done" onSubmitEditing={() => { void register(); }} editable={!busy} error={submitted && password !== confirmation ? "Passwords do not match." : undefined} />
+        <AuthNotice text={error} />
+        <AuthButton title="Create account" busy={busy} onPress={() => { void register(); }} />
+      </>}
+      {success && needsConfirmation && <AuthTextAction title="Resend confirmation email" onPress={() => router.push({ pathname: "/(auth)/resend-confirmation", params: { email: email.trim() } })} />}
+      <AuthTextAction title="Already registered? Sign in" disabled={busy} onPress={() => router.replace("/(auth)/login")} />
+      <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+    </AuthScreen>
   );
 }

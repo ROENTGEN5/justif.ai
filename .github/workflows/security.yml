@@ -59,6 +59,7 @@ jobs:
           npx tsc --noEmit
           node scripts/test-stream.cjs
           node scripts/test-cache.cjs
+          node scripts/test-auth.cjs
           node scripts/test-guided-a11y.cjs
           node scripts/test-citations.cjs
       - name: npm audit (runtime deps)

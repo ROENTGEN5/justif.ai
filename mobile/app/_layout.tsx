@@ -6,7 +6,7 @@
 
 import "../global.css";
 import React, { useEffect } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator } from "react-native";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -14,17 +14,19 @@ import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { ThemeProvider, useTheme } from "../lib/theme";
 import { warmUpBackend } from "../lib/api";
+import { authDestination } from "../lib/authRouting";
+import { AuthButton, AuthTextAction } from "../components/AuthForm";
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, sessionError, retrySession } = useAuth();
   const { theme } = useTheme();
   const segments = useSegments();
   const router = useRouter();
 
-  console.log("[RootLayoutNav] isLoading:", isLoading, "session:", !!session, "segments:", segments);
+  const publicPrivacy = segments[0] === "(auth)" && segments[1] === "privacy-notice";
 
   // Silent cold-start ping + safety fallback to ensure splash screen hides within 2.5s
   useEffect(() => {
@@ -36,23 +38,19 @@ function RootLayoutNav() {
   }, []);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || sessionError) return;
 
-    const inAuthGroup = segments[0] === "(auth)";
-    console.log("[RootLayoutNav] Redirect check — inAuthGroup:", inAuthGroup, "session:", !!session);
-
-    if (!session && !inAuthGroup) {
-      router.replace("/(auth)/register");
-    } else if (session && inAuthGroup) {
-      router.replace("/(main)/chat");
-    }
+    // Recovery must exchange its one-use code before showing a password form.
+    // Its temporary session must not redirect the user straight into chat.
+    const destination = authDestination(!!session, segments);
+    if (destination) router.replace(destination);
 
     // Hide splash screen once loading is complete and routing is handled
     SplashScreen.hideAsync().catch(() => {});
-  }, [session, isLoading, segments, router]);
+  }, [session, isLoading, sessionError, segments, router]);
 
   // Show loading spinner while checking auth
-  if (isLoading) {
+  if ((isLoading || sessionError) && !publicPrivacy) {
     return (
       <View
         style={{
@@ -60,9 +58,20 @@ function RootLayoutNav() {
           justifyContent: "center",
           alignItems: "center",
           backgroundColor: theme.background,
+          padding: 24,
         }}
       >
-        <ActivityIndicator size="large" color={theme.accent} />
+        <View style={{ width: "100%", maxWidth: 420, gap: 20 }}>
+          {isLoading ? <>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <Text accessibilityLiveRegion="polite" style={{ color: theme.text, textAlign: "center", fontSize: 16 }}>Checking your sign-in...</Text>
+          </> : <>
+            <Text accessibilityRole="header" style={{ color: theme.text, textAlign: "center", fontSize: 22, fontWeight: "700" }}>Couldn&apos;t check your sign-in</Text>
+            <Text accessibilityRole="alert" style={{ color: theme.textSecondary, textAlign: "center", fontSize: 15, lineHeight: 22 }}>{sessionError}</Text>
+            <AuthButton title="Try again" onPress={retrySession} />
+          </>}
+          <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+        </View>
       </View>
     );
   }

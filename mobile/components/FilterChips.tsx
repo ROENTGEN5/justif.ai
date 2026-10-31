@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Colors } from "../constants/Colors";
 import { useTheme } from "../lib/theme";
-import { singleLine } from "../lib/textFix";
+import { singleLine, textFix } from "../lib/textFix";
 
 interface FilterChipsProps {
   lawTypes: string[];
@@ -58,17 +58,17 @@ function FilterChips({ lawTypes, selectedTypes, onToggle, onClear }: FilterChips
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: theme.border, backgroundColor: theme.background }}>
       {/* Collapsed header row */}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, gap: 8 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, gap: 8 }}>
         <TouchableOpacity
           onPress={handleExpand}
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel={`${expanded ? "Hide" : "Show"} law type filters${hasSelection ? `, ${selectedTypes.length} active` : ""}`}
           accessibilityState={{ expanded }}
-          style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4, paddingRight: 6, minHeight: 32 }}
+          style={{ flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4, paddingRight: 6, minHeight: 32 }}
         >
           <Ionicons name="options-outline" size={15} color={hasSelection ? theme.text : theme.textSecondary} />
-          <Text {...singleLine} style={{ fontSize: 12, fontWeight: "600", color: hasSelection ? theme.text : theme.textSecondary }}>
+          <Text {...textFix} style={{ flexShrink: 0, paddingHorizontal: 2, fontSize: 12, fontWeight: "600", color: hasSelection ? theme.text : theme.textSecondary }}>
             Filter laws
           </Text>
           {hasSelection && (
@@ -97,7 +97,7 @@ function FilterChips({ lawTypes, selectedTypes, onToggle, onClear }: FilterChips
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             style={{ paddingHorizontal: 10, paddingVertical: 5, justifyContent: "center", borderRadius: 14, backgroundColor: Colors.error + "15", borderWidth: 1, borderColor: Colors.error + "30" }}
           >
-            <Text {...singleLine} style={{ fontSize: 11, fontWeight: "600", color: Colors.error }}>✕ Clear</Text>
+            <Text {...textFix} style={{ paddingHorizontal: 2, fontSize: 11, fontWeight: "600", color: Colors.error }}>✕ Clear</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -118,7 +118,7 @@ function FilterChips({ lawTypes, selectedTypes, onToggle, onClear }: FilterChips
                 accessibilityState={{ checked: isSelected }}
                 style={{ paddingHorizontal: 14, paddingVertical: 7, justifyContent: "center", borderRadius: 16, backgroundColor: isSelected ? theme.chipActiveBg : theme.chipBg, borderWidth: 1, borderColor: isSelected ? theme.chipActiveBg : theme.chipBorder }}
               >
-                <Text {...singleLine} style={{ fontSize: 12, fontWeight: isSelected ? "700" : "500", color: isSelected ? theme.chipActiveText : theme.chipText }}>{label}</Text>
+                <Text {...textFix} style={{ paddingHorizontal: 2, fontSize: 12, fontWeight: isSelected ? "700" : "500", color: isSelected ? theme.chipActiveText : theme.chipText }}>{label}</Text>
               </TouchableOpacity>
             );
           })}

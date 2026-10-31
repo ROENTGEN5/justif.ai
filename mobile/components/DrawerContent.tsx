@@ -12,6 +12,7 @@ import {
   Alert,
   TextInput,
   Platform,
+  useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -104,6 +105,7 @@ function formatRelativeTime(dateStr: string): string {
 // ─── Component ──────────────────────────────────────────────
 
 export default function DrawerContent(props: any) {
+  const { fontScale } = useWindowDimensions();
   const { user, signOut } = useAuth();
   const { mode, theme, setMode } = useTheme();
   const router = useRouter();
@@ -270,6 +272,8 @@ export default function DrawerContent(props: any) {
           style={{
             flexDirection: "row",
             padding: 3,
+            flexWrap: "wrap",
+            gap: 3,
             borderRadius: 12,
             backgroundColor: theme.surfaceElevated,
             borderWidth: 1,
@@ -287,8 +291,10 @@ export default function DrawerContent(props: any) {
                 accessibilityLabel={`${opt.label} theme`}
                 accessibilityState={{ selected }}
                 style={{
-                  flex: 1,
-                  flexDirection: "row",
+                  flexGrow: 1,
+                  flexBasis: 76 * fontScale,
+                  minWidth: 76 * fontScale,
+                  flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
                   paddingVertical: 7,
@@ -304,9 +310,11 @@ export default function DrawerContent(props: any) {
                   color={selected ? theme.accentText : theme.textSecondary}
                 />
                 <Text
-                  {...singleLine}
+                  {...textFix}
                   style={{
-                    flexShrink: 1,
+                    alignSelf: "stretch",
+                    paddingHorizontal: 2,
+                    textAlign: "center",
                     fontSize: 12,
                     fontWeight: selected ? "700" : "500",
                     color: selected ? theme.accentText : theme.textSecondary,

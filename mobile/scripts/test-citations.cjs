@@ -11,7 +11,7 @@ function load(file, dependencies = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },
   }).outputText;
   vm.runInNewContext(code, { exports, require: name => dependencies[name] || {},
-    setTimeout, clearTimeout, navigator: undefined });
+    setTimeout, clearTimeout, navigator: undefined, process: { env: {} } });
   return exports;
 }
 const citations = load('lib/citations.ts');
