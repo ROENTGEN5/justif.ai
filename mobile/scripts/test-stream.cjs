@@ -96,6 +96,8 @@ async function start(callbacks, signal, requestId) {
 
   // Verify M10: genuine network failure falls back to user-scoped offline cache
   nextFetchResponse = () => { throw new Error('Network request failed'); };
+  await assert.rejects(exportsObject.getChatMessages('chat-1', { allowCacheFallback: false }), /Network request failed/);
+  await assert.rejects(exportsObject.getChats({ allowCacheFallback: false }), /Network request failed/);
   const offlineMsgs = await exportsObject.getChatMessages('chat-1');
   assert.equal(offlineMsgs[0].id, 'cached-msg');
   const offlineChats = await exportsObject.getChats();

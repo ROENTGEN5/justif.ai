@@ -12,6 +12,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test:auth": "node scripts/test-auth.cjs",
+    "test:refresh": "node scripts/test-refresh.cjs",
+    "test:drawer": "node scripts/test-drawer.cjs",
     "build:apk:small": "eas build --platform android --profile preview-arm64",
     "build:apk:universal": "eas build --platform android --profile preview-optimized"
   },

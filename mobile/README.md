@@ -40,6 +40,22 @@ Startup waits for the stored-session result. A failure or a 12-second timeout sh
 
 ## Checks
 
+### Drawer performance
+
+The drawer memoizes filtered/grouped history, formatted timestamps, and individual rows. Unchanged history keeps its previous array, and navigator state objects are not passed into the drawer content. Gesture/transition events defer data updates until movement ends. Chat/profile loading starts after opening finishes, with cached history shown first. No animation duration was shortened, and no polling or additional runtime dependency was added.
+
+Run `node scripts/test-drawer.cjs` for update deferral, latest-update coalescing, close handling, disposal, and account isolation. Before release, check repeated open/close, interrupted swipes, long history, search, theme switching, and pull-to-refresh in a release APK on a lower-end Android phone. Unit checks do not measure frame rate.
+
+### Pull-to-refresh
+
+At the top of a conversation or the drawer's chat-history list, pull down and release to fetch fresh data. The empty chat welcome screen also supports refresh. Normal upward scrolling does not make network requests.
+
+Refresh keeps existing content, drafts, language, and filter selections. It is blocked during answer generation or an unresolved failed request, and briefly disables sending while history refreshes. A failed refresh shows connection guidance without treating cached data as a fresh response. Initial/offline loading still supports the existing cache fallback. Results from a previous chat or an unmounted screen are ignored.
+
+Native acceptance: test long, short, and empty conversations; pull twice quickly; refresh offline; navigate away during refresh; verify draft retention and that the list stays at the top. Android/iOS pull gestures require a device check.
+
+Run `node scripts/test-refresh.cjs` for request coordination, failure, retry, and stale-response checks.
+
 ```powershell
 npx tsc --noEmit
 npm run lint

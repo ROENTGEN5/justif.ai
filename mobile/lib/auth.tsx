@@ -13,10 +13,10 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { Alert } from "react-native";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import Strings from "../constants/Strings";
+import SignOutDialog from "../components/SignOutDialog";
+import { authErrorMessage } from "./authForms";
 import { createSessionLoader } from "./sessionLoader";
 import { passwordError } from "./authForms";
 // ─── Types ──────────────────────────────────────────────────
@@ -66,6 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const sessionLoader = useRef<{ start: () => void; cancel: () => void } | null>(null);
   const retrySession = useCallback(() => sessionLoader.current?.start(), []);
   const isRegisteringRef = useRef(false);
+  const [signOutVisible, setSignOutVisible] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const signOutPending = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -148,30 +152,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  // Sign out
+  // Every sign-out entry point uses the same themed confirmation.
   const signOut = useCallback(async () => {
-    Alert.alert(Strings.signOut, Strings.signOutConfirm, [
-      { text: Strings.cancel, style: "cancel" },
-      {
-        text: Strings.confirm,
-        style: "destructive",
-        onPress: async () => {
-          await clearConversationCaches();
-          const { error } = await supabase.auth.signOut();
-          await clearConversationCaches();
-          if (error) {
-            Alert.alert("Error", error.message);
-          }
-        },
-      },
-    ]);
+    setSignOutError("");
+    setSignOutVisible(true);
   }, []);
+
+  const confirmSignOut = async () => {
+    if (signOutPending.current) return;
+    signOutPending.current = true;
+    setSignOutBusy(true);
+    setSignOutError("");
+    try {
+      await clearConversationCaches();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      await clearConversationCaches();
+      setSignOutVisible(false);
+    } catch (error) {
+      setSignOutError(authErrorMessage(error, "Could not sign out. Check your connection and try again."));
+    } finally {
+      signOutPending.current = false;
+      setSignOutBusy(false);
+    }
+  };
 
   return (
     <AuthContext.Provider
       value={{ session, user, isLoading, sessionError, retrySession, signIn, signUp, signOut }}
     >
       {children}
+      <SignOutDialog visible={signOutVisible} busy={signOutBusy} error={signOutError}
+        onCancel={() => { if (!signOutPending.current) setSignOutVisible(false); }}
+        onConfirm={() => { void confirmSignOut(); }} />
     </AuthContext.Provider>
   );
 }

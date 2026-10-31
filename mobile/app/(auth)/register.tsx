@@ -35,7 +35,10 @@ export default function RegisterScreen() {
   };
 
   return (
-    <AuthScreen title={success ? "Next step" : "Create an account"} subtitle="Save your conversations and ask about Philippine law.">
+    <AuthScreen title={success ? "Almost there" : "Create your account"} subtitle="A place for your Philippine legal questions." footer={<>
+      <AuthTextAction title="Already have an account? Sign in" disabled={busy} onPress={() => router.replace("/(auth)/login")} />
+      <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+    </>}>
       {success ? <AuthNotice text={success} /> : <>
         <AuthField label="Full name" value={name} onChangeText={setName} placeholder="Your full name" autoCapitalize="words" autoComplete="name" textContentType="name" editable={!busy} error={submitted && !name.trim() ? "Enter your name." : undefined} />
         <AuthField label="Email" value={email} onChangeText={setEmail} placeholder="email@example.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" editable={!busy} error={submitted ? emailError(email) : undefined} />
@@ -44,9 +47,7 @@ export default function RegisterScreen() {
         <AuthNotice text={error} />
         <AuthButton title="Create account" busy={busy} onPress={() => { void register(); }} />
       </>}
-      {success && needsConfirmation && <AuthTextAction title="Resend confirmation email" onPress={() => router.push({ pathname: "/(auth)/resend-confirmation", params: { email: email.trim() } })} />}
-      <AuthTextAction title="Already registered? Sign in" disabled={busy} onPress={() => router.replace("/(auth)/login")} />
-      <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+      {!!success && needsConfirmation && <AuthTextAction title="Resend confirmation email" onPress={() => router.push({ pathname: "/(auth)/resend-confirmation", params: { email: email.trim() } })} />}
     </AuthScreen>
   );
 }

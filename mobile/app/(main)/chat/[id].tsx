@@ -10,6 +10,7 @@ import {
   View,
   Text,
   FlatList,
+  RefreshControl,
   Alert,
   Modal,
   TouchableOpacity,
@@ -49,6 +50,8 @@ import {
 } from "../../../lib/api";
 import { cacheOwner } from "../../../lib/conversationCache";
 import { useTheme } from "../../../lib/theme";
+import { usePullRefresh } from "../../../hooks/usePullRefresh";
+import RefreshNotice from "../../../components/RefreshNotice";
 import { textFix } from "../../../lib/textFix";
 
 interface DisplayMessage {
@@ -95,11 +98,13 @@ export default function ExistingChatScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [thinkingStage, setThinkingStage] = useState<string | undefined>(undefined);
+  const initialHistoryPending = useRef(true);
   const [isFetchingHistory, setIsFetchingHistory] = useState(true);
   const [preferredLanguage, setPreferredLanguage] = useState<PreferredLanguage>("English");
   const [prefillText, setPrefillText] = useState<string | undefined>(undefined);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const isScrolledUpRef = useRef(false);
+  const preserveRefreshPosition = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
   // Reviews & tracking
@@ -118,7 +123,7 @@ export default function ExistingChatScreen() {
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    if (isScrolledUpRef.current) return;
+    if (isScrolledUpRef.current || preserveRefreshPosition.current) return;
     if (flatListRef.current && messages.length > 0) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -127,6 +132,7 @@ export default function ExistingChatScreen() {
   }, [messages.length]);
 
   const forceScrollToBottom = useCallback(() => {
+    preserveRefreshPosition.current = false;
     isScrolledUpRef.current = false;
     setIsScrolledUp(false);
     if (flatListRef.current && messages.length > 0) {
@@ -163,6 +169,17 @@ export default function ExistingChatScreen() {
     [isLoading, messages]
   );
 
+  const { refreshing, refreshError, refreshInFlight, onRefresh } = usePullRefresh(chatId || undefined, {
+    blocked: () => requestBusy.current || !!failedRequest || isAnyMessageTyping || initialHistoryPending.current,
+    before: () => { preserveRefreshPosition.current = true; isScrolledUpRef.current = true; setIsScrolledUp(true); },
+    load: async () => chatId ? getChatMessages(chatId, { allowCacheFallback: false }) : [],
+    apply: data => {
+      if (!chatId) return;
+      setMessages(data.map(message => ({ ...message, role: message.role as "user" | "assistant", animateTyping: false, isStreaming: false })));
+      announceScreenReader("Conversation refreshed.");
+    },
+  });
+
   // Auto-scroll when the keyboard opens
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -176,6 +193,7 @@ export default function ExistingChatScreen() {
   useEffect(() => {
     if (!chatId) return;
     let isMounted = true;
+    initialHistoryPending.current = true;
 
     const fetchMessages = async () => {
       try {
@@ -217,6 +235,7 @@ export default function ExistingChatScreen() {
         }
       } finally {
         if (isMounted) {
+          initialHistoryPending.current = false;
           setIsFetchingHistory(false);
         }
       }
@@ -249,7 +268,7 @@ export default function ExistingChatScreen() {
 
   const handleSend = useCallback(
     async (text: string, retryId?: string) => {
-      if (requestBusy.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
       if (!chatId) return;
 
       requestBusy.current = true;
@@ -394,12 +413,12 @@ export default function ExistingChatScreen() {
         }
       }
     },
-    [chatId, selectedTypes, sessionQueries, failedRequest]
+    [chatId, selectedTypes, sessionQueries, failedRequest, refreshInFlight]
   );
 
   const handleFileSelected = useCallback(
     async (file: FileAttachment, userPrompt?: string, retryId?: string) => {
-      if (requestBusy.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
       if (!chatId) return;
 
       requestBusy.current = true;
@@ -478,7 +497,7 @@ export default function ExistingChatScreen() {
         setThinkingStage(undefined);
       }
     },
-    [chatId, sessionQueries, failedRequest]
+    [chatId, sessionQueries, failedRequest, refreshInFlight]
   );
 
   const handleRate = useCallback(
@@ -620,9 +639,13 @@ export default function ExistingChatScreen() {
           </View>
         </View>
 
+        <RefreshNotice message={refreshError} />
+
         {/* Messages list */}
         <FlatList
           ref={flatListRef}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} enabled={!isAnyMessageTyping && !failedRequest} colors={[theme.accent]} tintColor={theme.accent} progressBackgroundColor={theme.surfaceElevated} />}
+            alwaysBounceVertical
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
@@ -636,7 +659,8 @@ export default function ExistingChatScreen() {
             paddingBottom: 24,
             flexGrow: messages.length === 0 ? 1 : undefined,
           }}
-          onScroll={handleScroll}
+          onScrollBeginDrag={() => { preserveRefreshPosition.current = false; }}
+            onScroll={handleScroll}
           scrollEventThrottle={16}
           onContentSizeChange={scrollToBottom}
           onLayout={scrollToBottom}
@@ -740,6 +764,7 @@ export default function ExistingChatScreen() {
           onFileSelected={handleFileSelected}
           onFocus={scrollToBottom}
           isLoading={isLoading}
+          disabled={refreshing}
           prefillText={prefillText}
           onClearPrefill={handleClearPrefill}
         />

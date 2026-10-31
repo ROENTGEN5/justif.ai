@@ -4,7 +4,7 @@
     "slug": "justifai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/brand-icon.png",
     "scheme": "justifai",
     "jsEngine": "hermes",
     "userInterfaceStyle": "automatic",
@@ -22,7 +22,7 @@
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#171717",
-        "foregroundImage": "./assets/adaptive-icon.png"
+        "foregroundImage": "./assets/brand-adaptive.png"
       },
       "permissions": [
         "android.permission.INTERNET",
@@ -35,7 +35,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/icon.png"
+      "favicon": "./assets/brand-favicon.png"
     },
     "plugins": [
       "expo-dev-client",
@@ -50,8 +50,8 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash.png",
-          "imageWidth": 300,
+          "image": "./assets/brand-splash.png",
+          "imageWidth": 180,
           "resizeMode": "contain",
           "backgroundColor": "#171717"
         }

@@ -3,37 +3,43 @@
  * Shows chat history, new chat button, theme switcher, user profile, and sign out.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback, memo } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
+  RefreshControl,
   Alert,
   TextInput,
   Platform,
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
+import BrandLogo from "./BrandLogo";
 import { Ionicons } from "@expo/vector-icons";
+import type { DrawerContentComponentProps } from "expo-router/drawer";
+import { createDrawerUpdates, createDrawerMotion } from "../lib/drawerUpdates";
 import { useRouter } from "expo-router";
-import { Colors, ThemeMode } from "../constants/Colors";
+import { Colors, ThemeMode, ThemeColors } from "../constants/Colors";
 import { Strings } from "../constants/Strings";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme";
-import { getChats, deleteChat, Chat, getProfile, UserProfile } from "../lib/api";
+import { getChats, getCachedChats, deleteChat, Chat, getProfile, UserProfile } from "../lib/api";
+import { usePullRefresh } from "../hooks/usePullRefresh";
+import RefreshNotice from "./RefreshNotice";
 import { textFix, singleLine } from "../lib/textFix";
 
 // ─── Helpers ────────────────────────────────────────────────
 
 type GroupedItem =
   | { type: "header"; label: string }
-  | { type: "chat"; chat: Chat };
+  | { type: "chat"; chat: Chat; timeLabel: string };
 
-function groupChatsWithHeaders(chats: Chat[]): GroupedItem[] {
+function groupChatsWithHeaders(chats: Chat[], day: string): GroupedItem[] {
   if (chats.length === 0) return [];
 
-  const now = new Date();
+  const now = new Date(day);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -70,7 +76,7 @@ function groupChatsWithHeaders(chats: Chat[]): GroupedItem[] {
     if (group.chats.length > 0) {
       result.push({ type: "header", label: group.label });
       for (const chat of group.chats) {
-        result.push({ type: "chat", chat });
+        result.push({ type: "chat", chat, timeLabel: formatRelativeTime(chat.updated_at) });
       }
     }
   }
@@ -102,9 +108,107 @@ function formatRelativeTime(dateStr: string): string {
   }
 }
 
+const HistoryRow = memo(function HistoryRow({ item, theme, onSelect, onDelete }: {
+  item: GroupedItem; theme: ThemeColors; onSelect: (id: string) => void; onDelete: (id: string) => void;
+}) {
+  if (item.type === "header") {
+    return (
+      <View
+        style={{
+          paddingHorizontal: 20,
+          paddingTop: 16,
+          paddingBottom: 6,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 11,
+            fontWeight: "800",
+            color: theme.accent,
+            letterSpacing: 0.8,
+            textTransform: "uppercase",
+          }}
+        >
+          {item.label}
+        </Text>
+      </View>
+    );
+  }
+
+  const chat = item.chat;
+  const isFileChat = chat.title.startsWith("📎");
+
+  return (
+    <TouchableOpacity
+      onPress={() => onSelect(chat.id)}
+      onLongPress={() => onDelete(chat.id)}
+      activeOpacity={0.7}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 11,
+        paddingHorizontal: 20,
+        gap: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.divider,
+      }}
+    >
+      <View
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          backgroundColor: theme.surfaceElevated,
+          justifyContent: "center",
+          alignItems: "center",
+          borderWidth: 1,
+          borderColor: theme.border,
+        }}
+      >
+        <Ionicons
+          name={isFileChat ? "document-text-outline" : "chatbubble-outline"}
+          size={15}
+          color={theme.textTertiary}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          {...textFix}
+          numberOfLines={1}
+          style={{
+            fontSize: 14,
+            fontWeight: "600",
+            color: theme.text,
+          }}
+        >
+          {chat.title}
+        </Text>
+        <Text
+          {...singleLine}
+          style={{
+            fontSize: 11,
+            color: theme.textTertiary,
+            marginTop: 2,
+          }}
+        >
+          {item.timeLabel}
+        </Text>
+      </View>
+      <Ionicons
+        name="chevron-forward"
+        size={14}
+        color={theme.textTertiary}
+        style={{ opacity: 0.5 }}
+      />
+    </TouchableOpacity>
+  );
+});
+const historyKey = (item: GroupedItem) => item.type === "header" ? `header-${item.label}` : item.chat.id;
+const historyContainer = { flexGrow: 1 };
+
 // ─── Component ──────────────────────────────────────────────
 
-export default function DrawerContent(props: any) {
+const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<DrawerContentComponentProps, "navigation"> & { motion: ReturnType<typeof createDrawerMotion> }) {
   const { fontScale } = useWindowDimensions();
   const { user, signOut } = useAuth();
   const { mode, theme, setMode } = useTheme();
@@ -113,54 +217,111 @@ export default function DrawerContent(props: any) {
   const [searchQuery, setSearchQuery] = useState("");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const loadingHistory = useRef(false);
+  const deletingChat = useRef(false);
+  const loadGeneration = useRef(0);
+  const updates = useRef<ReturnType<typeof createDrawerUpdates> | null>(null);
+  const [historyDay, setHistoryDay] = useState(() => new Date().toDateString());
+  const applyChats = useCallback((next: Chat[]) => {
+    setHistoryDay(new Date().toDateString());
+    setChats(previous => previous.length === next.length && previous.every((chat, i) =>
+      chat.id === next[i].id && chat.title === next[i].title && chat.updated_at === next[i].updated_at && chat.created_at === next[i].created_at
+    ) ? previous : next);
+  }, []);
+  const { refreshing, refreshError, onRefresh, cancelRefresh } = usePullRefresh(user?.id, {
+    blocked: () => loadingHistory.current || deletingChat.current || !!updates.current?.isPaused(),
+    load: () => getChats({ allowCacheFallback: false }),
+    apply: data => {
+      const generation = loadGeneration.current;
+      updates.current?.run("history", () => { if (generation === loadGeneration.current) applyChats(data); });
+    },
+  });
 
-  // Fetch chats and profile when drawer opens or user/navigation state updates
+  // Read/render history after the actual opening transition, not during its slide.
+  // The same gate queues responses arriving during a later close or swipe.
   useEffect(() => {
     let active = true;
-    Promise.all([getChats(), getProfile()])
-      .then(([chatsData, profileData]) => {
-        if (!active) return;
-        setChats(chatsData);
-        setProfile(profileData);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch data:", err);
-      })
-      .finally(() => {
-        if (active) setIsLoading(false);
-      });
+    const gate = createDrawerUpdates();
+    if (motion.isMoving()) gate.pause();
+    updates.current = gate;
+    const load = async () => {
+      if (!user?.id || loadingHistory.current || deletingChat.current) return;
+      loadingHistory.current = true;
+      const generation = ++loadGeneration.current;
+      const valid = () => active && generation === loadGeneration.current;
+      try {
+        const cached = await getCachedChats().catch(() => []);
+        if (valid() && cached.length) gate.run("history", () => {
+          if (valid()) { applyChats(cached); setIsLoading(false); }
+        });
+        const [history, account] = await Promise.allSettled([getChats(), getProfile()]);
+        if (!valid()) return;
+        gate.run("history", () => {
+          if (!valid()) return;
+          if (history.status === "fulfilled") applyChats(history.value);
+          if (account.status === "fulfilled") setProfile(account.value);
+          setIsLoading(false);
+        });
+      } finally {
+        if (valid()) loadingHistory.current = false;
+      }
+    };
+    const generationRef = loadGeneration;
+    const unsubscribe = motion.subscribe({
+      start: () => gate.pause(),
+      end: closing => {
+        gate.resume();
+        if (!closing) void load();
+      },
+    });
+    if (motion.isOpen() && !motion.isMoving()) void load();
     return () => {
       active = false;
+      generationRef.current++;
+      loadingHistory.current = false;
+      unsubscribe();
+      gate.dispose();
+      if (updates.current === gate) updates.current = null;
     };
-  }, [user?.id, props.state?.index]);
+  }, [user?.id, motion, applyChats]);
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     router.push("/(main)/chat");
-    props.navigation.closeDrawer();
-  };
+    navigation.closeDrawer();
+  }, [router, navigation]);
 
-  const handleChatPress = (chatId: string) => {
+  const handleChatPress = useCallback((chatId: string) => {
     router.push(`/(main)/chat/${chatId}`);
-    props.navigation.closeDrawer();
-  };
+    navigation.closeDrawer();
+  }, [router, navigation]);
 
-  const handleDeleteChat = (chatId: string) => {
+  const handleDeleteChat = useCallback((chatId: string) => {
     Alert.alert(Strings.deleteChat, Strings.deleteChatConfirm, [
       { text: Strings.cancel, style: "cancel" },
       {
         text: Strings.confirm,
         style: "destructive",
         onPress: async () => {
+          cancelRefresh();
+          loadGeneration.current++;
+          loadingHistory.current = false;
+          deletingChat.current = true;
           try {
             await deleteChat(chatId);
             setChats((prev) => prev.filter((c) => c.id !== chatId));
           } catch {
             Alert.alert("Error", Strings.errorGeneric);
+          } finally {
+            deletingChat.current = false;
           }
         },
       },
     ]);
-  };
+  }, [cancelRefresh]);
+
+  const renderHistoryItem = useCallback(({ item }: { item: GroupedItem }) => (
+    <HistoryRow item={item} theme={theme} onSelect={handleChatPress} onDelete={handleDeleteChat} />
+  ), [theme, handleChatPress, handleDeleteChat]);
 
   const userDisplayName =
     profile?.full_name || user?.user_metadata?.full_name || user?.email || "User";
@@ -173,9 +334,10 @@ export default function DrawerContent(props: any) {
     { key: "night", label: Strings.nightMode, icon: "cloudy-night-outline" },
   ];
 
-  const filteredChats = chats.filter((chat) =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const groupedHistory = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    return groupChatsWithHeaders(chats.filter(chat => chat.title.toLowerCase().includes(query)), historyDay);
+  }, [chats, searchQuery, historyDay]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.drawerBg }}>
@@ -190,17 +352,7 @@ export default function DrawerContent(props: any) {
       >
         {/* Logo & Brand */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Image
-            source={require("../assets/logo.png")}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              borderWidth: 2,
-              borderColor: theme.logoCircleBorder,
-            }}
-            contentFit="cover"
-          />
+          <BrandLogo size={48} />
           <View style={{ flex: 1 }}>
             <Text
               {...textFix}
@@ -383,6 +535,7 @@ export default function DrawerContent(props: any) {
           </View>
         </View>
 
+        <RefreshNotice message={refreshError} />
         {isLoading ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 14 }}>
             {[0.75, 0.55, 0.85, 0.65].map((widthRatio, idx) => (
@@ -426,8 +579,12 @@ export default function DrawerContent(props: any) {
               </View>
             ))}
           </View>
-        ) : filteredChats.length === 0 ? (
-          <View
+        ) : (
+          <FlatList
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.accent]} tintColor={theme.accent} progressBackgroundColor={theme.surfaceElevated} />}
+            alwaysBounceVertical
+            contentContainerStyle={historyContainer}
+            ListEmptyComponent={<View
             style={{
               paddingVertical: 30,
               paddingHorizontal: 20,
@@ -476,111 +633,15 @@ export default function DrawerContent(props: any) {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
-        ) : (
-          <FlatList
-            data={groupChatsWithHeaders(filteredChats)}
-            keyExtractor={(item) =>
-              item.type === "header" ? `header-${item.label}` : item.chat.id
-            }
+          </View>}
+            data={groupedHistory}
+            keyExtractor={historyKey}
             initialNumToRender={10}
             maxToRenderPerBatch={8}
             windowSize={5}
             removeClippedSubviews={Platform.OS === "android"}
             showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => {
-              if (item.type === "header") {
-                return (
-                  <View
-                    style={{
-                      paddingHorizontal: 20,
-                      paddingTop: 16,
-                      paddingBottom: 6,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "800",
-                        color: theme.accent,
-                        letterSpacing: 0.8,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {item.label}
-                    </Text>
-                  </View>
-                );
-              }
-
-              const chat = item.chat;
-              const isFileChat = chat.title.startsWith("📎");
-
-              return (
-                <TouchableOpacity
-                  onPress={() => handleChatPress(chat.id)}
-                  onLongPress={() => handleDeleteChat(chat.id)}
-                  activeOpacity={0.7}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    paddingVertical: 11,
-                    paddingHorizontal: 20,
-                    gap: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: theme.divider,
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
-                      backgroundColor: theme.surfaceElevated,
-                      justifyContent: "center",
-                      alignItems: "center",
-                      borderWidth: 1,
-                      borderColor: theme.border,
-                    }}
-                  >
-                    <Ionicons
-                      name={isFileChat ? "document-text-outline" : "chatbubble-outline"}
-                      size={15}
-                      color={theme.textTertiary}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      {...textFix}
-                      numberOfLines={1}
-                      style={{
-                        fontSize: 14,
-                        fontWeight: "600",
-                        color: theme.text,
-                      }}
-                    >
-                      {chat.title}
-                    </Text>
-                    <Text
-                      {...singleLine}
-                      style={{
-                        fontSize: 11,
-                        color: theme.textTertiary,
-                        marginTop: 2,
-                      }}
-                    >
-                      {formatRelativeTime(chat.updated_at)}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={14}
-                    color={theme.textTertiary}
-                    style={{ opacity: 0.5 }}
-                  />
-                </TouchableOpacity>
-              );
-            }}
+            renderItem={renderHistoryItem}
           />
         )}
       </View>
@@ -598,7 +659,7 @@ export default function DrawerContent(props: any) {
         <TouchableOpacity
           onPress={() => {
             router.push("/(main)/privacy" as any);
-            props.navigation.closeDrawer();
+            navigation.closeDrawer();
           }}
           activeOpacity={0.7}
           style={{
@@ -633,7 +694,7 @@ export default function DrawerContent(props: any) {
         <TouchableOpacity
           onPress={() => {
             router.push("/(main)/profile");
-            props.navigation.closeDrawer();
+            navigation.closeDrawer();
           }}
           activeOpacity={0.7}
           style={{
@@ -729,4 +790,6 @@ export default function DrawerContent(props: any) {
       </View>
     </View>
   );
-}
+});
+
+export default DrawerContent;

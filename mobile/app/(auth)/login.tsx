@@ -25,15 +25,16 @@ export default function LoginScreen() {
   };
 
   return (
-    <AuthScreen title="Welcome back" subtitle="Sign in to continue your legal questions and conversations.">
+    <AuthScreen title="Welcome back" subtitle="Your conversations, ready when you are." footer={<>
+      <AuthTextAction title="New here? Create an account" disabled={busy} onPress={() => router.push("/(auth)/register")} />
+      <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+    </>}>
       <AuthField label="Email" value={email} onChangeText={setEmail} placeholder="email@example.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" editable={!busy} error={submitted ? emailError(email) : undefined} />
       <AuthField label="Password" password value={password} onChangeText={setPassword} autoCapitalize="none" autoComplete="current-password" textContentType="password" returnKeyType="go" onSubmitEditing={() => { void login(); }} editable={!busy} error={submitted && !password ? "Enter your password." : undefined} />
       <AuthTextAction title="Forgot password?" disabled={busy} onPress={() => router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } })} />
-      <AuthTextAction title="Resend confirmation email" disabled={busy} onPress={() => router.push({ pathname: "/(auth)/resend-confirmation", params: { email: email.trim() } })} />
       <AuthNotice text={error} />
       <AuthButton title="Sign in" busy={busy} onPress={() => { void login(); }} />
-      <AuthTextAction title="New to Justif AI? Create an account" disabled={busy} onPress={() => router.push("/(auth)/register")} />
-      <AuthTextAction title="Privacy notice" onPress={() => router.push("/(auth)/privacy-notice")} />
+      <AuthTextAction title="Resend confirmation email" disabled={busy} onPress={() => router.push({ pathname: "/(auth)/resend-confirmation", params: { email: email.trim() } })} />
     </AuthScreen>
   );
 }

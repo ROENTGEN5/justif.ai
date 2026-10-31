@@ -4,8 +4,9 @@ import { useAuth } from "../../lib/auth";
  * Drawer navigator with custom content showing chat history.
  */
 
-import React from "react";
-import { Drawer } from "expo-router/drawer";
+import React, { useMemo, useCallback } from "react";
+import { Drawer, type DrawerContentComponentProps } from "expo-router/drawer";
+import { createDrawerMotion } from "../../lib/drawerUpdates";
 import { Ionicons } from "@expo/vector-icons";
 import DrawerContent from "../../components/DrawerContent";
 import { useTheme } from "../../lib/theme";
@@ -13,11 +14,21 @@ import { useTheme } from "../../lib/theme";
 export default function MainLayout() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const drawerMotion = useMemo(() => createDrawerMotion(user?.id), [user?.id]);
+  const renderDrawer = useCallback((props: DrawerContentComponentProps) => (
+    <DrawerContent navigation={props.navigation} motion={drawerMotion} />
+  ), [drawerMotion]);
+  const drawerListeners = useMemo(() => ({
+    gestureStart: () => drawerMotion.start(),
+    transitionStart: () => drawerMotion.start(),
+    transitionEnd: (event: { data: { closing: boolean } }) => drawerMotion.end(event.data.closing),
+  }), [drawerMotion]);
 
   return (
     <Drawer
       key={user?.id || "signed-out"}
-      drawerContent={(props) => <DrawerContent {...props} />}
+      drawerContent={renderDrawer}
+      screenListeners={drawerListeners}
       screenOptions={{
         headerStyle: {
           backgroundColor: theme.headerBg,

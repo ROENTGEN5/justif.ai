@@ -308,7 +308,7 @@ export async function streamMessage(
 /**
  * Get all chats for the current user, with automatic local cache persistence and offline fallback.
  */
-export async function getChats(): Promise<Chat[]> {
+export async function getChats(options: { allowCacheFallback?: boolean } = {}): Promise<Chat[]> {
   const owner = await cacheOwner();
   try {
     const headers = await getAuthHeaders();
@@ -330,6 +330,7 @@ export async function getChats(): Promise<Chat[]> {
     return chats;
   } catch (err) {
     if (owner !== await cacheOwner() || (err as any)?.status === 401 || (err as any)?.status === 403 || (err as any)?.status === 404) throw err;
+    if (options.allowCacheFallback === false) throw err;
     const cached = await getCachedChats();
     if (cached.length > 0) {
       return cached;
@@ -342,7 +343,8 @@ export async function getChats(): Promise<Chat[]> {
  * Get all messages for a specific chat, with local cache persistence and offline fallback.
  */
 export async function getChatMessages(
-  chatId: string
+  chatId: string,
+  options: { allowCacheFallback?: boolean } = {}
 ): Promise<ChatMessage[]> {
   const owner = await cacheOwner();
   try {
@@ -369,6 +371,7 @@ export async function getChatMessages(
     return messages;
   } catch (err) {
     if (owner !== await cacheOwner() || (err as any)?.status === 401 || (err as any)?.status === 403 || (err as any)?.status === 404) throw err;
+    if (options.allowCacheFallback === false) throw err;
     const cached = await getCachedChatMessages(chatId);
     if (cached.length > 0) {
       return cached;

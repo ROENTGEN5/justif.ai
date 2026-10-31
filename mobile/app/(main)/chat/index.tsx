@@ -10,6 +10,7 @@ import {
   View,
   Text,
   FlatList,
+  RefreshControl,
   ScrollView,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -19,7 +20,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from "react-native";
-import { Image } from "expo-image";
+import BrandLogo from "../../../components/BrandLogo";
 import * as Haptics from "expo-haptics";
 import { Strings } from "../../../constants/Strings";
 import ChatMessage from "../../../components/ChatMessage";
@@ -35,11 +36,15 @@ import {
   newRequestId,
   streamMessage,
   getLawTypes,
+  getChatMessages,
+  getChats,
   analyzeFile,
   LawSource,
   FileAttachment,
 } from "../../../lib/api";
 import { useTheme } from "../../../lib/theme";
+import { usePullRefresh } from "../../../hooks/usePullRefresh";
+import RefreshNotice from "../../../components/RefreshNotice";
 import { textFix } from "../../../lib/textFix";
 
 interface DisplayMessage {
@@ -90,6 +95,7 @@ export default function NewChatScreen() {
   const [prefillText, setPrefillText] = useState<string | undefined>(undefined);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const isScrolledUpRef = useRef(false);
+  const preserveRefreshPosition = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
   // Filter state
@@ -102,7 +108,7 @@ export default function NewChatScreen() {
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    if (isScrolledUpRef.current) return;
+    if (isScrolledUpRef.current || preserveRefreshPosition.current) return;
     if (flatListRef.current && messages.length > 0) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -111,6 +117,7 @@ export default function NewChatScreen() {
   }, [messages.length]);
 
   const forceScrollToBottom = useCallback(() => {
+    preserveRefreshPosition.current = false;
     isScrolledUpRef.current = false;
     setIsScrolledUp(false);
     if (flatListRef.current && messages.length > 0) {
@@ -147,6 +154,23 @@ export default function NewChatScreen() {
     [isLoading, messages]
   );
 
+  const { refreshing, refreshError, refreshInFlight, onRefresh } = usePullRefresh(chatId || undefined, {
+    blocked: () => requestBusy.current || !!failedRequest || isAnyMessageTyping,
+    before: () => { preserveRefreshPosition.current = true; isScrolledUpRef.current = true; setIsScrolledUp(true); },
+    load: async () => {
+      const [history, types] = await Promise.all([
+        chatId ? getChatMessages(chatId, { allowCacheFallback: false }) : getChats({ allowCacheFallback: false }).then(() => []),
+        getLawTypes(),
+      ]);
+      return { history, types };
+    },
+    apply: ({ history, types }) => {
+      setLawTypes(types);
+      if (chatId) setMessages(history.map(message => ({ ...message, role: message.role as "user" | "assistant", animateTyping: false, isStreaming: false })));
+      announceScreenReader(chatId ? "Conversation refreshed." : "Chat list refreshed.");
+    },
+  });
+
   // Auto-scroll when the keyboard opens
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -177,7 +201,7 @@ export default function NewChatScreen() {
 
   const handleSend = useCallback(
     async (text: string, retryId?: string) => {
-      if (requestBusy.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
       requestBusy.current = true;
       const requestId = retryId || newRequestId();
       if (!retryId) {
@@ -312,12 +336,12 @@ export default function NewChatScreen() {
         }
       }
     },
-    [chatId, selectedTypes, failedRequest]
+    [chatId, selectedTypes, failedRequest, refreshInFlight]
   );
 
   const handleFileSelected = useCallback(
     async (file: FileAttachment, userPrompt?: string, retryId?: string) => {
-      if (requestBusy.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
       requestBusy.current = true;
       const requestId = retryId || newRequestId();
       if (!retryId) requestContext.current = { chatId: chatId || undefined };
@@ -384,7 +408,7 @@ export default function NewChatScreen() {
         setThinkingStage(undefined);
       }
     },
-    [chatId, failedRequest]
+    [chatId, failedRequest, refreshInFlight]
   );
 
   const renderWelcomeHeader = () => {
@@ -392,6 +416,8 @@ export default function NewChatScreen() {
 
     return (
       <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.accent]} tintColor={theme.accent} progressBackgroundColor={theme.surfaceElevated} />}
+        alwaysBounceVertical
         style={{ flex: 1 }}
         contentContainerStyle={{
           flexGrow: 1,
@@ -403,17 +429,7 @@ export default function NewChatScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Image
-          source={require("../../../assets/logo.png")}
-          accessibilityIgnoresInvertColors
-          style={{
-            width: 64,
-            height: 64,
-            marginBottom: 12,
-            borderRadius: 16,
-          }}
-          contentFit="cover"
-        />
+        <BrandLogo size={80} style={{ marginBottom: 16 }} />
 
         <Text
           accessibilityRole="header"
@@ -554,12 +570,16 @@ export default function NewChatScreen() {
           </View>
         )}
 
+        <RefreshNotice message={refreshError} />
+
         {/* Messages list */}
         {messages.length === 0 ? (
           renderWelcomeHeader()
         ) : (
           <FlatList
             ref={flatListRef}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} enabled={!isAnyMessageTyping && !failedRequest} colors={[theme.accent]} tintColor={theme.accent} progressBackgroundColor={theme.surfaceElevated} />}
+            alwaysBounceVertical
             data={messages}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
@@ -572,6 +592,7 @@ export default function NewChatScreen() {
               paddingTop: 16,
               paddingBottom: 16,
             }}
+            onScrollBeginDrag={() => { preserveRefreshPosition.current = false; }}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             onContentSizeChange={scrollToBottom}
@@ -656,6 +677,7 @@ export default function NewChatScreen() {
           onFileSelected={handleFileSelected}
           onFocus={scrollToBottom}
           isLoading={isLoading}
+          disabled={refreshing}
           prefillText={prefillText}
           onClearPrefill={handleClearPrefill}
         />
