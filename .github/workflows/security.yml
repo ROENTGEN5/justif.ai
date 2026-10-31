@@ -29,7 +29,12 @@ jobs:
       - name: Security + regression tests
         env:
           PYTHONPATH: ".:tests"
+          # Offline tests initialize the client but mock all database operations.
+          SUPABASE_URL: http://127.0.0.1:1
+          # Dummy JWT signed with a test-only key; not valid for any hosted project.
+          SUPABASE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImNpIiwiZXhwIjo0MTAyNDQ0ODAwfQ.cMyqY9E61Kb4GB4AzzVH8BMEqQMaCiBY9Gk38Vhb7GU
           SUPABASE_JWT_SECRET: ci-placeholder-secret
+          DEBUG: "false"
           RATE_LIMIT: 30/minute
         run: >
           python -m unittest
