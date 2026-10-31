@@ -4,7 +4,7 @@ import { useAuth } from "../../lib/auth";
  * Drawer navigator with custom content showing chat history.
  */
 
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useEffect } from "react";
 import { Drawer, type DrawerContentComponentProps } from "expo-router/drawer";
 import { createDrawerMotion } from "../../lib/drawerUpdates";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,6 +15,7 @@ export default function MainLayout() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const drawerMotion = useMemo(() => createDrawerMotion(user?.id), [user?.id]);
+  useEffect(() => () => drawerMotion.dispose(), [drawerMotion]);
   const renderDrawer = useCallback((props: DrawerContentComponentProps) => (
     <DrawerContent navigation={props.navigation} motion={drawerMotion} />
   ), [drawerMotion]);

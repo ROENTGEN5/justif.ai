@@ -25,17 +25,34 @@ export function createDrawerUpdates() {
 export function createDrawerMotion(accountId?: string) {
   let moving = false;
   let open = false;
+  let fallback: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<{ start: () => void; end: (closing: boolean) => void }>();
+  const settle = (closing: boolean) => {
+    clearTimeout(fallback);
+    fallback = undefined;
+    moving = false;
+    open = !closing;
+    listeners.forEach(listener => listener.end(closing));
+  };
+  const start = () => {
+    clearTimeout(fallback);
+    moving = true;
+    listeners.forEach(listener => listener.start());
+    // Events may be absent/interrupted on a platform. Never gate data forever.
+    fallback = setTimeout(() => settle(!open), 750);
+  };
   return {
     accountId,
     isMoving: () => moving,
     isOpen: () => open,
-    start() { moving = true; listeners.forEach(listener => listener.start()); },
-    end(closing: boolean) {
-      moving = false;
-      open = !closing;
-      listeners.forEach(listener => listener.end(closing));
+    start,
+    end: settle,
+    observeVisibility(visible: boolean) {
+      if (open === visible) return;
+      open = visible;
+      start();
     },
+    dispose() { clearTimeout(fallback); moving = false; listeners.clear(); },
     subscribe(listener: { start: () => void; end: (closing: boolean) => void }) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

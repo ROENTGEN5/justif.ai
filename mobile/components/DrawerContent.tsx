@@ -18,7 +18,8 @@ import {
 import { Image } from "expo-image";
 import BrandLogo from "./BrandLogo";
 import { Ionicons } from "@expo/vector-icons";
-import type { DrawerContentComponentProps } from "expo-router/drawer";
+import { useDrawerStatus, type DrawerContentComponentProps } from "expo-router/drawer";
+import { loadDrawerData } from "../lib/drawerData";
 import { createDrawerUpdates, createDrawerMotion } from "../lib/drawerUpdates";
 import { useRouter } from "expo-router";
 import { Colors, ThemeMode, ThemeColors } from "../constants/Colors";
@@ -208,7 +209,16 @@ const historyContainer = { flexGrow: 1 };
 
 // ─── Component ──────────────────────────────────────────────
 
-const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<DrawerContentComponentProps, "navigation"> & { motion: ReturnType<typeof createDrawerMotion> }) {
+type DrawerProps = Pick<DrawerContentComponentProps, "navigation"> & { motion: ReturnType<typeof createDrawerMotion> };
+
+// The visibility context is reliable even when animation events are not emitted.
+function DrawerContent(props: DrawerProps) {
+  const status = useDrawerStatus();
+  useEffect(() => { props.motion.observeVisibility(status === "open"); }, [status, props.motion]);
+  return <DrawerPanel {...props} />;
+}
+
+const DrawerPanel = memo(function DrawerPanel({ navigation, motion }: DrawerProps) {
   const { fontScale } = useWindowDimensions();
   const { user, signOut } = useAuth();
   const { mode, theme, setMode } = useTheme();
@@ -217,6 +227,7 @@ const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<D
   const [searchQuery, setSearchQuery] = useState("");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
   const loadingHistory = useRef(false);
   const deletingChat = useRef(false);
   const loadGeneration = useRef(0);
@@ -233,7 +244,7 @@ const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<D
     load: () => getChats({ allowCacheFallback: false }),
     apply: data => {
       const generation = loadGeneration.current;
-      updates.current?.run("history", () => { if (generation === loadGeneration.current) applyChats(data); });
+      updates.current?.run("history", () => { if (generation === loadGeneration.current) { applyChats(data); setHistoryError(""); } });
     },
   });
 
@@ -249,22 +260,26 @@ const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<D
       loadingHistory.current = true;
       const generation = ++loadGeneration.current;
       const valid = () => active && generation === loadGeneration.current;
-      try {
-        const cached = await getCachedChats().catch(() => []);
-        if (valid() && cached.length) gate.run("history", () => {
+      await loadDrawerData({
+        cached: getCachedChats,
+        history: getChats,
+        profile: getProfile,
+        onCached: cached => gate.run("history", () => {
           if (valid()) { applyChats(cached); setIsLoading(false); }
-        });
-        const [history, account] = await Promise.allSettled([getChats(), getProfile()]);
-        if (!valid()) return;
-        gate.run("history", () => {
+        }),
+        onHistory: history => gate.run("history", () => {
+          if (valid()) { applyChats(history); setHistoryError(""); }
+        }),
+        onProfile: account => gate.run("profile", () => { if (valid()) setProfile(account); }),
+        onError: () => gate.run("history-error", () => {
+          if (valid()) setHistoryError("Could not load chat history. Check your connection and pull down to retry.");
+        }),
+        onSettled: () => {
           if (!valid()) return;
-          if (history.status === "fulfilled") applyChats(history.value);
-          if (account.status === "fulfilled") setProfile(account.value);
-          setIsLoading(false);
-        });
-      } finally {
-        if (valid()) loadingHistory.current = false;
-      }
+          loadingHistory.current = false;
+          gate.run("loading", () => { if (valid()) setIsLoading(false); });
+        },
+      });
     };
     const generationRef = loadGeneration;
     const unsubscribe = motion.subscribe({
@@ -535,7 +550,7 @@ const DrawerContent = memo(function DrawerContent({ navigation, motion }: Pick<D
           </View>
         </View>
 
-        <RefreshNotice message={refreshError} />
+        <RefreshNotice message={refreshError || historyError} />
         {isLoading ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 14 }}>
             {[0.75, 0.55, 0.85, 0.65].map((widthRatio, idx) => (

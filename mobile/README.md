@@ -42,9 +42,9 @@ Startup waits for the stored-session result. A failure or a 12-second timeout sh
 
 ### Drawer performance
 
-The drawer memoizes filtered/grouped history, formatted timestamps, and individual rows. Unchanged history keeps its previous array, and navigator state objects are not passed into the drawer content. Gesture/transition events defer data updates until movement ends. Chat/profile loading starts after opening finishes, with cached history shown first. No animation duration was shortened, and no polling or additional runtime dependency was added.
+The drawer memoizes filtered/grouped history, formatted timestamps, and individual rows. Unchanged history keeps its previous array, and navigator state objects are not passed into the drawer content. Gesture/transition events defer data updates until movement ends. Chat loading starts after opening finishes, with cached history shown first. A drawer-visibility observer and a 750ms fallback release queued work if animation events are missed. Profile loading runs independently; history has a 12-second deadline and stops its skeleton with retry guidance on failure. No animation duration was shortened, and no polling or additional runtime dependency was added.
 
-Run `node scripts/test-drawer.cjs` for update deferral, latest-update coalescing, close handling, disposal, and account isolation. Before release, check repeated open/close, interrupted swipes, long history, search, theme switching, and pull-to-refresh in a release APK on a lower-end Android phone. Unit checks do not measure frame rate.
+Run `node scripts/test-drawer.cjs` for update deferral, latest-update coalescing, close handling, disposal, missed animation events, a stalled profile, and history timeout handling. Before release, check repeated open/close, interrupted swipes, long history, search, theme switching, and pull-to-refresh in a release APK on a lower-end Android phone. Unit checks do not measure frame rate.
 
 ### Pull-to-refresh
 
