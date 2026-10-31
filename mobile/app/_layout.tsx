@@ -23,7 +23,7 @@ SplashScreen.preventAutoHideAsync();
 function RootLayoutNav() {
   const { session, isLoading, sessionError, retrySession } = useAuth();
   const { theme } = useTheme();
-  const segments = useSegments();
+  const segments: readonly string[] = useSegments();
   const router = useRouter();
 
   const publicPrivacy = segments[0] === "(auth)" && segments[1] === "privacy-notice";

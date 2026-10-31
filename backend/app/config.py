@@ -48,7 +48,8 @@ class Settings:
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
 
     # Server
-    HOST: str = os.getenv("HOST", "0.0.0.0")
+    # Local execution stays on loopback; the production Procfile sets its bind explicitly.
+    HOST: str = os.getenv("HOST", "127.0.0.1")
     PORT: int = int(os.getenv("PORT", "8000"))
 
     # Security
