@@ -35,7 +35,7 @@ async def _run(message, history, law_types, top_k, rewrite, records, started):
                 "usage": records, "timings": {"plan_seconds": plan_seconds,
                     "retrieval_seconds": 0, "generation_seconds": 0, "total_seconds": time.perf_counter() - started}}
     query = plan.query
-    law_query = retrieval_identity(message, history, plan.uses_history)
+    law_query = retrieval_identity(message, history, plan.uses_history, query)
     retrieval_started = time.perf_counter()
     results = await asyncio.to_thread(
         rag_service.search, query, top_k=top_k, law_types=law_types, strict=True, law_query=law_query)
@@ -112,7 +112,7 @@ async def stream_chat_pipeline(message, history=None, law_types=None, top_k=5, r
 
         yield {"type": "thinking", "stage": "Analyzing relevant Supreme Court decisions..."}
         query = plan.query
-        law_query = retrieval_identity(message, history, plan.uses_history)
+        law_query = retrieval_identity(message, history, plan.uses_history, query)
         retrieval_started = time.perf_counter()
         results = await asyncio.to_thread(
             rag_service.search,

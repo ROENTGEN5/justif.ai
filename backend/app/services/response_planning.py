@@ -4,6 +4,9 @@ import re
 
 from app.services.law_lookup import named_laws
 
+HISTORY_MESSAGE_LIMIT = 40
+HISTORY_CHAR_LIMIT = 32000
+
 
 @dataclass(frozen=True)
 class QueryPlan:
@@ -25,15 +28,18 @@ def requested_sections(text):
     return found[:4]
 
 
-def retrieval_identity(message, history, uses_history=False):
+def retrieval_identity(message, history, uses_history=False, query=""):
     """Never allow an LLM-invented law number to become an exact-law filter."""
     if named_laws(message) or not uses_history:
+        return message
+    planned_laws = {(ref["family"], ref["number"]) for ref in named_laws(query)}
+    if not planned_laws:
         return message
     for item in reversed(history or []):
         if item.get("role") != "user":
             continue
         previous = item.get("content", "")
-        references = named_laws(previous)
+        references = [ref for ref in named_laws(previous) if (ref["family"], ref["number"]) in planned_laws]
         if references:
             identities = " ".join(("IRR of " if r["implementing_rules"] else "") +
                                   f"{r['family']} No. {r['number']}" for r in references)
@@ -62,7 +68,7 @@ def validate_plan(data, message):
     return QueryPlan(data["intent"], query[:1200].strip() or message, data["language"], data["uses_history"], answer.strip())
 
 
-def bounded_history(messages, max_messages=12, max_chars=12000):
+def bounded_history(messages, max_messages=HISTORY_MESSAGE_LIMIT, max_chars=HISTORY_CHAR_LIMIT):
     if max_messages <= 0 or max_chars <= 0:
         return []
     selected, remaining = [], max_chars

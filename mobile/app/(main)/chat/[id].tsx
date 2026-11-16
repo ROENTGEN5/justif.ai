@@ -439,8 +439,8 @@ export default function ExistingChatScreen() {
 
       if (!retryId) setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
-      setThinkingStage("Reading & analyzing legal document...");
-      announceScreenReader("Uploading and analyzing legal document. Please wait.");
+      setThinkingStage("Checking attachment for legal relevance...");
+      announceScreenReader("Uploading attachment and checking legal relevance. Please wait.");
 
       try {
         const response = await analyzeFile(
@@ -470,7 +470,9 @@ export default function ExistingChatScreen() {
         });
 
         announceScreenReader(
-          `Document analysis complete with ${response.sources?.length || 0} cited sources.`
+          response.is_legal_document
+            ? `Attachment review complete with ${response.sources?.length || 0} cited sources.`
+            : "Attachment relevance check complete."
         );
 
         if (newCount % 3 === 0 && response.message_id) {

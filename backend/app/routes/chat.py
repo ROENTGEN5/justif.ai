@@ -16,6 +16,7 @@ from app.services.deepseek import generate_chat_title
 from app.services.document_pipeline import analyze_document, DocumentInputError, DocumentProviderError
 from app.services.rag import rag_service, LAW_TYPES, RAGSearchError
 from app.services.chat_pipeline import run_chat_pipeline, stream_chat_pipeline
+from app.services.response_planning import HISTORY_MESSAGE_LIMIT
 from app.models.schemas import (
     ChatMessageRequest,
     ChatMessageResponse,
@@ -80,6 +81,19 @@ def _sanitize_filename(name: str | None) -> str:
     base = re.split(r"[\\/]", name or "")[-1]
     base = re.sub(r"[\x00-\x1f\x7f]", "", base).strip()
     return base[:120] or "uploaded_file"
+
+
+async def _load_chat_history(client, chat_id: str) -> list[dict]:
+    # Both rows of a saved turn can share a timestamp. Reverse the query result
+    # so the user message precedes its assistant reply in the model context.
+    result = await run_db(client.table("messages")
+        .select("role, content")
+        .eq("chat_id", chat_id)
+        .order("created_at", desc=True)
+        .order("role")
+        .limit(HISTORY_MESSAGE_LIMIT)
+        .execute)
+    return list(reversed(result.data or []))
 
 
 def _save_chat_turn(
@@ -163,16 +177,7 @@ async def send_message(
                 )
             title = chat_check.data[0].get("title") or "Bagong Usapan"
 
-            # Fetch existing messages for context
-            messages_result = (
-                await run_db(client.table("messages")
-                .select("role, content")
-                .eq("chat_id", chat_id)
-                .order("created_at", desc=True)
-                .limit(12)
-                .execute)
-            )
-            previous_messages = list(reversed(messages_result.data or []))
+            previous_messages = await _load_chat_history(client, chat_id)
 
         result = await run_chat_pipeline(
             request.message, history=previous_messages, law_types=request.law_types)
@@ -246,15 +251,7 @@ async def stream_chat(
                 detail="Chat not found or access denied.",
             )
         title = chat_check.data[0].get("title") or "Bagong Usapan"
-        messages_result = (
-            await run_db(client.table("messages")
-            .select("role, content")
-            .eq("chat_id", chat_id)
-            .order("created_at", desc=True)
-            .limit(12)
-            .execute)
-        )
-        previous_messages = list(reversed(messages_result.data or []))
+        previous_messages = await _load_chat_history(client, chat_id)
 
     async def event_generator():
         try:
@@ -456,6 +453,7 @@ async def get_chat_messages(
             .select("id, role, content, created_at, rating, sources")
             .eq("chat_id", chat_id)
             .order("created_at", desc=False)
+            .order("role", desc=True)
             .execute)
         )
 
@@ -676,16 +674,7 @@ async def analyze_uploaded_file(
                 )
             title = chat_check.data[0].get("title") or f"📎 {filename}"
 
-            # Fetch existing messages for context
-            messages_result = (
-                await run_db(client.table("messages")
-                .select("role, content")
-                .eq("chat_id", chat_id)
-                .order("created_at", desc=True)
-                .limit(12)
-                .execute)
-            )
-            previous_messages = list(reversed(messages_result.data or []))
+            previous_messages = await _load_chat_history(client, chat_id)
 
         # ── Prepare the user's file upload message ────────────
         user_content = f"📎 Uploaded: {filename}"
