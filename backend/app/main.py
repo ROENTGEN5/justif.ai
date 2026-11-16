@@ -7,8 +7,11 @@ Run with: uvicorn app.main:app --reload
 """
 
 import logging
+import os
+import re
+from time import perf_counter
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -97,13 +100,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """Connect to Pinecone vector database and verify Ollama when the server starts."""
     logger.info("🚀 Starting Justif.ai API...")
+    started = perf_counter()
 
     # Initialize the RAG service (connects to Pinecone + checks Ollama)
     try:
         rag_service.initialize()
         if rag_service.is_ready:
             logger.info(
-                f"✅ RAG service ready: {len(rag_service.chunks)} vectors in Pinecone"
+                f"✅ RAG service ready: {rag_service.total_vectors} vectors in Pinecone"
             )
         else:
             logger.warning(
@@ -113,6 +117,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to initialize RAG service: {e}")
 
     await start_clients()
+    logger.info("API startup_seconds=%.3f rag_ready=%s", perf_counter() - started, rag_service.is_ready)
     try:
         yield  # App is running
     finally:
@@ -184,8 +189,11 @@ async def root_health():
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
 @limiter.exempt
-async def api_health():
+async def api_health(response: Response):
     """API health check endpoint."""
+    revision = os.getenv("RENDER_GIT_COMMIT", "")
+    if re.fullmatch(r"[0-9a-f]{40}", revision):
+        response.headers["X-JustifAI-Revision"] = revision
     return HealthResponse(rag_ready=rag_service.is_ready, embedding_provider=settings.EMBEDDING_PROVIDER)
 
 

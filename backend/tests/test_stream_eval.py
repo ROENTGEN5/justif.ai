@@ -9,13 +9,16 @@ class StreamTests(unittest.TestCase):
         collector.line("")
 
     def test_status_is_not_first_answer(self):
-        c = StreamCollector()
+        c = StreamCollector("request-example")
         self.emit(c, {"type": "thinking"})
+        self.emit(c, {"type": "token", "text": " "})
         self.assertIsNone(c.first)
         self.emit(c, {"type": "token", "text": "Hello"})
-        self.emit(c, {"type": "done", "response": "Hello", "chat_id": "test"})
-        self.assertEqual(c.result()["answer"], "Hello")
-        self.assertIsNotNone(c.first)
+        self.emit(c, {"type": "done", "response": " Hello", "chat_id": "test"})
+        result = c.result()
+        self.assertEqual(result["answer"], " Hello")
+        self.assertEqual(result["request_id"], "request-example")
+        self.assertLessEqual(result["first_status_seconds"], result["first_answer_seconds"])
 
     def test_disconnect_keeps_partial(self):
         c = StreamCollector()

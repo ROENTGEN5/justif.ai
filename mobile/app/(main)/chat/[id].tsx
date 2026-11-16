@@ -48,7 +48,7 @@ import {
   LawSource,
   FileAttachment,
 } from "../../../lib/api";
-import { cacheOwner } from "../../../lib/conversationCache";
+import { useAuth } from "../../../lib/auth";
 import { useTheme } from "../../../lib/theme";
 import { usePullRefresh } from "../../../hooks/usePullRefresh";
 import RefreshNotice from "../../../components/RefreshNotice";
@@ -75,6 +75,11 @@ function announceScreenReader(message: string) {
 
 export default function ExistingChatScreen() {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  return <ExistingConversation key={`${user?.id ?? ""}:${chatId ?? ""}`} chatId={chatId} owner={user?.id} />;
+}
+
+function ExistingConversation({ chatId, owner }: { chatId?: string; owner?: string }) {
   const { theme } = useTheme();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const activeStream = useRef<AbortController | null>(null);
@@ -98,9 +103,10 @@ export default function ExistingChatScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [thinkingStage, setThinkingStage] = useState<string | undefined>(undefined);
-  const initialHistoryPending = useRef(true);
+  const initialHistory = useRef<AbortController | null>(null);
   const [isFetchingHistory, setIsFetchingHistory] = useState(true);
   const [preferredLanguage, setPreferredLanguage] = useState<PreferredLanguage>("English");
+  const [historyError, setHistoryError] = useState("");
   const [prefillText, setPrefillText] = useState<string | undefined>(undefined);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const isScrolledUpRef = useRef(false);
@@ -170,11 +176,12 @@ export default function ExistingChatScreen() {
   );
 
   const { refreshing, refreshError, refreshInFlight, onRefresh } = usePullRefresh(chatId || undefined, {
-    blocked: () => requestBusy.current || !!failedRequest || isAnyMessageTyping || initialHistoryPending.current,
+    blocked: () => requestBusy.current || !!failedRequest || isAnyMessageTyping || !!initialHistory.current,
     before: () => { preserveRefreshPosition.current = true; isScrolledUpRef.current = true; setIsScrolledUp(true); },
     load: async () => chatId ? getChatMessages(chatId, { allowCacheFallback: false }) : [],
     apply: data => {
       if (!chatId) return;
+      setHistoryError("");
       setMessages(data.map(message => ({ ...message, role: message.role as "user" | "assistant", animateTyping: false, isStreaming: false })));
       announceScreenReader("Conversation refreshed.");
     },
@@ -189,63 +196,43 @@ export default function ExistingChatScreen() {
     return () => sub.remove();
   }, [scrollToBottom]);
 
-  // Fetch existing messages on mount (display offline cache immediately while refreshing)
+  // Hydrate the local view while the history request is in flight.
   useEffect(() => {
     if (!chatId) return;
-    let isMounted = true;
-    initialHistoryPending.current = true;
-
-    const fetchMessages = async () => {
-      try {
-        setIsFetchingHistory(true);
-        const cached = await getCachedChatMessages(chatId);
-        if (isMounted && cached.length > 0) {
-          setMessages(
-            cached.map((msg) => ({
-              id: msg.id,
-              role: msg.role as "user" | "assistant",
-              content: msg.content,
-              created_at: msg.created_at,
-              sources: msg.sources,
-              rating: msg.rating as "like" | "unlike" | undefined,
-            }))
-          );
-          setIsFetchingHistory(false);
-        }
-
-        const data = await getChatMessages(chatId);
-        if (isMounted) {
-          setMessages(
-            data.map((msg) => ({
-              id: msg.id,
-              role: msg.role as "user" | "assistant",
-              content: msg.content,
-              created_at: msg.created_at,
-              sources: msg.sources,
-              rating: msg.rating as "like" | "unlike" | undefined,
-            }))
-          );
-        }
-      } catch (error: any) {
-        if (isMounted) {
-          if (error?.status === 404 || error?.status === 403) {
-            setMessages([]);
-          }
-          Alert.alert("Error", error.message || Strings.errorGeneric);
-        }
-      } finally {
-        if (isMounted) {
-          initialHistoryPending.current = false;
-          setIsFetchingHistory(false);
-        }
+    const controller = new AbortController();
+    const { signal } = controller;
+    initialHistory.current = controller;
+    let remoteApplied = false;
+    const hydrate = getCachedChatMessages(chatId, owner).then(cached => {
+      if (!signal.aborted && !remoteApplied && cached.length > 0) {
+        setMessages(cached);
+        setIsFetchingHistory(false);
       }
-    };
-
-    fetchMessages();
+    }).catch(() => {});
+    const refresh = getChatMessages(chatId, { allowCacheFallback: false, signal }).then(data => {
+      if (signal.aborted) return;
+      remoteApplied = true;
+      setMessages(data);
+    }).catch(error => {
+      if (signal.aborted) return;
+      if ([401, 403, 404].includes(error?.status)) {
+        remoteApplied = true;
+        setMessages([]);
+      }
+      setHistoryError("Couldn't refresh conversation history. Pull down to try again.");
+    }).finally(() => {
+      if (!signal.aborted) setIsFetchingHistory(false);
+    });
+    void Promise.all([hydrate, refresh]).then(() => {
+      if (initialHistory.current === controller) {
+        initialHistory.current = null;
+      }
+    });
     return () => {
-      isMounted = false;
+      controller.abort();
+      if (initialHistory.current === controller) initialHistory.current = null;
     };
-  }, [chatId]);
+  }, [chatId, owner]);
 
   const handleToggleFilter = useCallback((type: string) => {
     setSelectedTypes((prev) =>
@@ -268,9 +255,10 @@ export default function ExistingChatScreen() {
 
   const handleSend = useCallback(
     async (text: string, retryId?: string) => {
-      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || isFetchingHistory || refreshInFlight.current || (failedRequest && !retryId)) return;
       if (!chatId) return;
 
+      initialHistory.current?.abort();
       requestBusy.current = true;
       const requestId = retryId || newRequestId();
       if (!retryId) {
@@ -280,7 +268,6 @@ export default function ExistingChatScreen() {
         };
       }
       setFailedRequest(null);
-      const owner = await cacheOwner();
       const userMsg: DisplayMessage = {
         id: `user-${requestId}`,
         role: "user",
@@ -413,19 +400,19 @@ export default function ExistingChatScreen() {
         }
       }
     },
-    [chatId, selectedTypes, sessionQueries, failedRequest, refreshInFlight]
+    [chatId, owner, isFetchingHistory, selectedTypes, sessionQueries, failedRequest, refreshInFlight]
   );
 
   const handleFileSelected = useCallback(
     async (file: FileAttachment, userPrompt?: string, retryId?: string) => {
-      if (requestBusy.current || refreshInFlight.current || (failedRequest && !retryId)) return;
+      if (requestBusy.current || isFetchingHistory || refreshInFlight.current || (failedRequest && !retryId)) return;
       if (!chatId) return;
 
+      initialHistory.current?.abort();
       requestBusy.current = true;
       const requestId = retryId || newRequestId();
       if (!retryId) requestContext.current = { chatId: chatId || undefined };
       setFailedRequest(null);
-      const owner = await cacheOwner();
       const displayContent = userPrompt
         ? `📎 Uploaded: ${file.name}\n\n${userPrompt}`
         : `📎 Uploaded: ${file.name}`;
@@ -499,7 +486,7 @@ export default function ExistingChatScreen() {
         setThinkingStage(undefined);
       }
     },
-    [chatId, sessionQueries, failedRequest, refreshInFlight]
+    [chatId, owner, isFetchingHistory, sessionQueries, failedRequest, refreshInFlight]
   );
 
   const handleRate = useCallback(
@@ -547,19 +534,6 @@ export default function ExistingChatScreen() {
     ),
     [handleRate, handleAskFollowUp, scrollToBottom, handleTypingComplete]
   );
-
-  // Loading state while fetching history (UI-thread Skeleton Loader)
-  if (isFetchingHistory) {
-    return (
-      <View
-        accessible={true}
-        accessibilityLabel="Loading conversation history"
-        style={{ flex: 1, backgroundColor: theme.background }}
-      >
-        <ChatSkeleton />
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -641,7 +615,7 @@ export default function ExistingChatScreen() {
           </View>
         </View>
 
-        <RefreshNotice message={refreshError} />
+        <RefreshNotice message={refreshError || historyError} />
 
         {/* Messages list */}
         <FlatList
@@ -673,24 +647,30 @@ export default function ExistingChatScreen() {
             isLoading ? <LoadingDots stageText={thinkingStage} /> : undefined
           }
           ListEmptyComponent={
-            <View
-              style={{
-                flex: 1,
-                justifyContent: "center",
-                alignItems: "center",
-                paddingHorizontal: 32,
-              }}
-            >
-              <Text
+            isFetchingHistory ? (
+              <View accessible accessibilityLabel="Loading conversation history">
+                <ChatSkeleton />
+              </View>
+            ) : (
+              <View
                 style={{
-                  fontSize: 15,
-                  color: theme.textTertiary,
-                  textAlign: "center",
+                  flex: 1,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  paddingHorizontal: 32,
                 }}
               >
-                {Strings.chatWelcome}
-              </Text>
-            </View>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    color: theme.textTertiary,
+                    textAlign: "center",
+                  }}
+                >
+                  {Strings.chatWelcome}
+                </Text>
+              </View>
+            )
           }
         />
 
@@ -767,6 +747,7 @@ export default function ExistingChatScreen() {
           onFocus={scrollToBottom}
           isLoading={isLoading}
           disabled={refreshing}
+          sendDisabled={isFetchingHistory}
           prefillText={prefillText}
           onClearPrefill={handleClearPrefill}
         />

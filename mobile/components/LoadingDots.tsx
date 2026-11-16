@@ -3,7 +3,7 @@
  * Contextual "Thinking Stages" indicator for legal research & analysis.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { View, Text } from "react-native";
 import Animated, {
   useSharedValue,
@@ -17,31 +17,13 @@ import Animated, {
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../lib/theme";
 
-const THINKING_STAGES: {
-  icon: keyof typeof Ionicons.glyphMap;
-  text: string;
-}[] = [
-  {
-    icon: "search-outline",
-    text: "Searching Philippine Laws & R.A. database...",
-  },
-  {
-    icon: "scale-outline",
-    text: "Analyzing relevant Supreme Court decisions...",
-  },
-  {
-    icon: "create-outline",
-    text: "Drafting legal analysis...",
-  },
-];
-
 interface LoadingDotsProps {
   stageText?: string;
 }
 
 export default function LoadingDots({ stageText }: LoadingDotsProps) {
   const { theme } = useTheme();
-  const [stageIndex, setStageIndex] = useState(0);
+  const status = stageText ?? "Connecting to Justif.ai…";
 
   const dot1 = useSharedValue(0);
   const dot2 = useSharedValue(0);
@@ -72,14 +54,6 @@ export default function LoadingDots({ stageText }: LoadingDotsProps) {
     );
   }, [dot1, dot2, dot3]);
 
-  useEffect(() => {
-    if (stageText) return;
-    const interval = setInterval(() => {
-      setStageIndex((prev) => (prev + 1) % THINKING_STAGES.length);
-    }, 1250);
-    return () => clearInterval(interval);
-  }, [stageText]);
-
   const animStyle1 = useAnimatedStyle(() => ({
     transform: [{ translateY: dot1.value }],
   }));
@@ -98,15 +72,13 @@ export default function LoadingDots({ stageText }: LoadingDotsProps) {
     marginHorizontal: 2.5,
   };
 
-  const currentStage = THINKING_STAGES[stageIndex];
-
   return (
     <Animated.View
       entering={FadeIn.duration(200)}
       className="items-start px-4 mb-3"
       accessible={true}
       accessibilityRole="progressbar"
-      accessibilityLabel={stageText || currentStage.text}
+      accessibilityLabel={status}
       accessibilityLiveRegion="polite"
     >
       <View
@@ -130,7 +102,7 @@ export default function LoadingDots({ stageText }: LoadingDotsProps) {
           }}
         >
           <Ionicons
-            name={stageText ? "sparkles-outline" : currentStage.icon}
+            name={stageText ? "sparkles-outline" : "cloud-outline"}
             size={14}
             color={theme.accent}
           />
@@ -142,7 +114,7 @@ export default function LoadingDots({ stageText }: LoadingDotsProps) {
               fontStyle: "italic",
             }}
           >
-            {stageText || currentStage.text}
+            {status}
           </Text>
         </View>
 

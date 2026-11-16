@@ -8,6 +8,7 @@ Supports both HMAC (HS256) and ECDSA (ES256) signed tokens.
 import jwt
 import base64
 import logging
+from time import perf_counter
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -42,6 +43,7 @@ class AuthenticatedUser:
         self.email = email
         self.role = role
         self.token = token
+        self.auth_seconds = None
 
     def __repr__(self):
         return f"AuthenticatedUser(id={self.user_id}, email={self.email})"
@@ -66,7 +68,7 @@ def _extract_user(payload: dict, token: str) -> AuthenticatedUser:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthenticatedUser:
-   
+    started = perf_counter()
     token = credentials.credentials
 
     # Read the token header to determine the algorithm
@@ -97,7 +99,7 @@ async def get_current_user(
             )
 
             user = _extract_user(payload, token)
-            logger.info(f"Auth OK (JWKS/{alg}): user={user.user_id} token=...{token[-8:]}")
+            user.auth_seconds = perf_counter() - started
             return user
 
         # ── HS256 / symmetric: use JWT secret ────────────────
@@ -127,7 +129,7 @@ async def get_current_user(
                         audience="authenticated",
                     )
                     user = _extract_user(payload, token)
-                    logger.info(f"Auth OK (HMAC): user={user.user_id} token=...{token[-8:]}")
+                    user.auth_seconds = perf_counter() - started
                     return user
                 except jwt.InvalidTokenError as e:
                     last_error = e
@@ -143,7 +145,7 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning(f"JWT verification failed for token=...{token[-8:]}: {type(e).__name__}")
+        logger.warning("JWT verification failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token. Please sign in again.",

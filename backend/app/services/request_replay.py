@@ -4,6 +4,7 @@ import json
 import re
 from contextvars import ContextVar
 from functools import wraps
+from time import perf_counter
 from uuid import uuid4
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,6 +35,7 @@ def idempotent(endpoint):
                         hashlib.sha256(data).hexdigest()]
         fingerprint = hashlib.sha256((endpoint.__name__ + json.dumps(identity, sort_keys=True)).encode()).hexdigest()
         lease = str(uuid4())
+        claim_started = perf_counter()
         state = (await run_db(client.rpc('claim_chat_request', {
             'p_id': key, 'p_fingerprint': fingerprint, 'p_lease': lease}).execute)).data
         if state['state'] == 'done':
@@ -44,7 +46,7 @@ def idempotent(endpoint):
             return state['result']
         if state['state'] != 'claimed':
             raise HTTPException(409, 'This request is still processing. Retry shortly.' if state['state']=='busy' else 'Request ID belongs to different content.')
-        context = {'client': client, 'key': key, 'lease': lease}
+        context = {'client': client, 'key': key, 'lease': lease, 'claim_seconds': perf_counter() - claim_started}
         async def release():
             await run_db(client.rpc('fail_chat_request', {'p_id': key, 'p_lease': lease}).execute)
         token = active_request.set(context)

@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import hashlib
+from time import perf_counter
 from pathlib import Path
 from typing import Optional
 
@@ -434,6 +435,7 @@ class RAGService:
                 logger.warning("PINECONE_API_KEY not set. RAG service disabled.")
                 return
 
+            pinecone_started = perf_counter()
             pc = Pinecone(api_key=settings.PINECONE_API_KEY)
             self.index = pc.Index(settings.PINECONE_INDEX_NAME)
 
@@ -442,10 +444,11 @@ class RAGService:
             self._total_vectors = stats.total_vector_count
             logger.info(
                 f"Connected to Pinecone index '{settings.PINECONE_INDEX_NAME}' "
-                f"with {self._total_vectors} vectors"
+                f"with {self._total_vectors} vectors in {perf_counter() - pinecone_started:.3f}s"
             )
 
             # Check embedding provider availability
+            embedding_started = perf_counter()
             if settings.EMBEDDING_PROVIDER in {"fastembed", "auto"}:
                 cpu_embeddings.initialize()
                 logger.info("Using self-hosted quantized Nomic v1.5 CPU embeddings; no Nomic API calls")
@@ -461,7 +464,8 @@ class RAGService:
                 raise ValueError("Unknown EMBEDDING_PROVIDER")
 
             self._loaded = True
-            logger.info("RAG service initialized successfully.")
+            logger.info("Retrieval ready; embedding provider=%s initialization_seconds=%.3f",
+                        settings.EMBEDDING_PROVIDER, perf_counter() - embedding_started)
 
         except Exception as e:
             logger.error(f"Failed to initialize RAG service: {e}")
@@ -470,6 +474,10 @@ class RAGService:
     @property
     def is_ready(self) -> bool:
         return self._loaded and self.index is not None
+
+    @property
+    def total_vectors(self) -> int:
+        return self._total_vectors
 
     @property
     def chunks(self) -> Optional[list]:
@@ -481,7 +489,7 @@ class RAGService:
             return [None] * self._total_vectors
         return None
 
-    def _requested_sections(self, candidates, targets, top_k):
+    def _requested_sections(self, candidates, targets, top_k, timings=None):
         """Use existing metadata/IDs to join up to five consecutive chunks.
 
         There is no index mutation. Fetch identity is checked against URL and
@@ -510,6 +518,7 @@ class RAGService:
                     if missing:
                         ids = {hashlib.md5(f"{chunk.short_title}|{chunk.label}|{i}".encode(), usedforsecurity=False).hexdigest(): i for i in missing}
                         ids.update({chunk_id(chunk.url, i): i for i in missing})
+                        fetch_started = perf_counter()
                         try:
                             fetched = self.index.fetch(ids=list(ids))
                             for vector_id, vector in fetched.vectors.items():
@@ -521,9 +530,11 @@ class RAGService:
                                 by_index[expected] = ChunkMetadata(chunk.short_title, chunk.full_title,
                                     chunk.law_type, chunk.date, chunk.url, chunk.label, expected, total, meta.get("text", ""))
                         except Exception as exc:
-                            # Existing retrieval remains usable, explicitly marked
-                            # incomplete; a best-effort neighbor fetch isn't an outage.
+                            # Keep evidence available with an incomplete span.
                             logger.warning("Section continuation unavailable (%s)", type(exc).__name__)
+                        finally:
+                            if timings is not None:
+                                timings["evidence_fetch_seconds"] += perf_counter() - fetch_started
                     for position in range(start + 1, last_allowed + 1):
                         if position not in by_index:
                             break  # Never bridge a missing chunk as continuous text.
@@ -550,6 +561,7 @@ class RAGService:
         law_types: Optional[list[str]] = None,
         strict: bool = False,
         law_query: Optional[str] = None,
+        timings: Optional[dict[str, float | bool]] = None,
     ) -> list[SearchResult]:
         """
         Search for the most relevant law chunks for a given query.
@@ -561,6 +573,7 @@ class RAGService:
             strict: Raise RAGSearchError on service failure instead of returning [].
             law_query: Original user question; prevents a rewritten law number
                 from determining the exact-law filter.
+            timings: Optional duration breakdown for the current request.
 
         Returns:
             List of SearchResult objects, sorted by relevance.
@@ -574,6 +587,9 @@ class RAGService:
             return []
 
         try:
+            if timings is not None:
+                timings.update(embedding_seconds=0.0, pinecone_query_seconds=0.0,
+                               evidence_fetch_seconds=0.0, section_cache_hit=False)
             references = named_laws(query if law_query is None else law_query)
             sections = requested_sections(query if law_query is None else law_query)
             cache_key = None
@@ -586,17 +602,23 @@ class RAGService:
                     query.strip().lower(),
                 )
                 if cache_key in self._section_cache:
+                    if timings is not None:
+                        timings["section_cache_hit"] = True
                     self._section_cache.move_to_end(cache_key)
                     return list(self._section_cache[cache_key])
 
             # Embed the query using Nomic Cloud API or Ollama
+            embed_started = perf_counter()
             query_embedding = embed_query(query)
+            if timings is not None:
+                timings["embedding_seconds"] = perf_counter() - embed_started
 
             # Exact metadata matching avoids substituting a semantically similar
             # law when the user explicitly names one. No unfiltered fallback.
             filters = ([law_filter(ref, law_types) for ref in references] if references else
                        [{"label": {"$in": law_types}} if law_types else None])
             matches = []
+            query_started = perf_counter()
             for pinecone_filter in filters:
                 query_response = self.index.query(
                     vector=query_embedding,
@@ -605,6 +627,8 @@ class RAGService:
                     filter=pinecone_filter,
                 )
                 matches.append(query_response.matches)
+            if timings is not None:
+                timings["pinecone_query_seconds"] = perf_counter() - query_started
 
             # Convert Pinecone results to SearchResult objects
             groups = []
@@ -624,7 +648,7 @@ class RAGService:
                         text=meta.get("text", ""),
                     )
                     results.append(SearchResult(chunk=chunk, score=match.score))
-                windows = self._requested_sections(results, sections, top_k) if references and sections else []
+                windows = self._requested_sections(results, sections, top_k, timings) if references and sections else []
                 recovered = {(r.evidence_span["kind"], r.evidence_span["number"]) for r in windows}
                 if windows and all(s in recovered for s in sections):
                     # Supply the focused section(s), not five unrelated snippets.

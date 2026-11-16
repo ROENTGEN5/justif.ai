@@ -6,7 +6,7 @@
 
 import "../global.css";
 import React, { useEffect } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator, AppState } from "react-native";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -28,13 +28,26 @@ function RootLayoutNav() {
 
   const publicPrivacy = segments[0] === "(auth)" && segments[1] === "privacy-notice";
 
-  // Silent cold-start ping + safety fallback to ensure splash screen hides within 2.5s
+  // Warm the backend in the background at launch and when the app is reopened.
   useEffect(() => {
+    let wasBackgrounded = AppState.currentState === "background";
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background") wasBackgrounded = true;
+      if (state === "active" && wasBackgrounded) {
+        wasBackgrounded = false;
+        void warmUpBackend();
+      }
+    });
     void warmUpBackend();
+
+    // Hide the splash even if session restoration is still in progress.
     const splashTimer = setTimeout(() => {
       SplashScreen.hideAsync().catch(() => {});
     }, 2500);
-    return () => clearTimeout(splashTimer);
+    return () => {
+      subscription.remove();
+      clearTimeout(splashTimer);
+    };
   }, []);
 
   useEffect(() => {

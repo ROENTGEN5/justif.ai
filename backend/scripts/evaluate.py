@@ -137,6 +137,8 @@ def write_reports(folder, rows, metadata):
     (folder / "results.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
     flat = [{"id": r["id"], "category": r.get("category"), "language": r.get("language"),
              "status": r["status"], "latency_seconds": r.get("latency_seconds"),
+             "request_id": r.get("request_id"), "headers_seconds": r.get("headers_seconds"),
+             "first_status_seconds": r.get("first_status_seconds"),
              "first_answer_seconds": r.get("first_answer_seconds"),
              **r.get("metrics", {}), **{f"judge_{k}": v for k, v in r.get("judge", {}).items()}} for r in rows]
     keys = sorted(set().union(*(r.keys() for r in flat)))
@@ -152,7 +154,7 @@ def write_reports(folder, rows, metadata):
     summary = {"metadata": metadata, "total": len(rows),
                "failed": sum(r["status"] != "ok" for r in rows), "averages": averages}
     summary["latency_distributions"] = {}
-    for key in ("latency_seconds", "first_answer_seconds"):
+    for key in ("latency_seconds", "headers_seconds", "first_status_seconds", "first_answer_seconds"):
         values = sorted(r[key] for r in rows if isinstance(r.get(key), (int, float)))
         if values:
             summary["latency_distributions"][key] = dict(n=len(values), median=statistics.median(values),
@@ -216,7 +218,8 @@ async def run(args):
         except Exception as exc:
             row.update(status="error", error=f"{type(exc).__name__}: {exc}")
             if isinstance(exc, StreamFailure):
-                row.update(partial_answer=exc.partial_answer, first_answer_seconds=exc.first_answer_seconds)
+                row.update(partial_answer=exc.partial_answer, first_answer_seconds=exc.first_answer_seconds,
+                           **exc.timings)
         row["latency_seconds"] = time.perf_counter() - started
         if args.judge and row["status"] == "ok":
             try:

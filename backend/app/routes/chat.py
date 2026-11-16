@@ -7,6 +7,8 @@ import re
 import json
 import asyncio
 import logging
+from time import perf_counter
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from app.middleware.auth import get_current_user, AuthenticatedUser
@@ -221,7 +223,14 @@ async def stream_chat(
     Stream a RAG-powered response via Server-Sent Events (SSE).
     Uses the unified chat pipeline and emits thinking stages, live token chunks, and final metadata/sources.
     """
-    client = get_user_client(user.token)
+    started = perf_counter()
+    request_id = request.request_id or uuid4().hex
+    replay_context = active_request.get()
+    timings = {
+        "auth_seconds": getattr(user, "auth_seconds", None),
+        "claim_seconds": replay_context["claim_seconds"] if replay_context else None,
+    }
+    client = replay_context["client"] if replay_context else get_user_client(user.token)
     chat_id = request.chat_id
 
     if not chat_id:
@@ -253,7 +262,10 @@ async def stream_chat(
         title = chat_check.data[0].get("title") or "Bagong Usapan"
         previous_messages = await _load_chat_history(client, chat_id)
 
+    timings["chat_prepare_seconds"] = perf_counter() - started
+
     async def event_generator():
+        outcome = "interrupted"
         try:
             full_answer = ""
             sources: list[LawSource] = []
@@ -265,23 +277,36 @@ async def stream_chat(
             ):
                 event_type = event.get("type")
                 if event_type in ("thinking", "token"):
+                    if event_type == "thinking":
+                        timings.setdefault("first_status_seconds", perf_counter() - started)
+                    elif "first_answer_seconds" not in timings and event["text"].strip():
+                        timings["first_answer_seconds"] = perf_counter() - started
                     yield f"data: {json.dumps(event)}\n\n"
                 elif event_type == "result":
+                    timings.update(event.get("timings", {}))
                     full_answer = event.get("answer") or ""
                     sources = [LawSource(**source) for source in event.get("sources", [])]
 
+            persistence_started = perf_counter()
             if full_answer.strip():
                 message_id = await run_db(_save_chat_turn, client, chat_id, request.message, full_answer, payload={"response": full_answer, "title": title, "sources": [s.model_dump() for s in sources]})
             else:
                 message_id = ""
+            timings["persistence_seconds"] = perf_counter() - persistence_started
 
+            outcome = "completed"
             yield f"data: {json.dumps({'type': 'done', 'chat_id': chat_id, 'message_id': message_id, 'title': title, 'response': full_answer, 'sources': [s.model_dump() for s in sources]})}\n\n"
         except RAGSearchError as exc:
+            outcome = "retrieval_error"
             logger.warning("Legal retrieval unavailable in stream_chat: %s", exc)
             yield f"data: {json.dumps({'type': 'error', 'detail': 'Legal sources are temporarily unavailable. Please try again.'})}\n\n"
         except Exception as exc:
+            outcome = "error"
             logger.error(f"Error in stream_chat for user={user.user_id}: {exc}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'detail': 'Failed to process message. Please try again.'})}\n\n"
+        finally:
+            timings["route_seconds"] = perf_counter() - started
+            logger.info("chat_stream request_id=%s outcome=%s timings=%s", request_id, outcome, json.dumps(timings))
 
     return StreamingResponse(
         event_generator(),
@@ -343,7 +368,7 @@ async def rag_status():
     """Get the status of the RAG system."""
     return RAGStatusResponse(
         is_ready=rag_service.is_ready,
-        total_chunks=len(rag_service.chunks) if rag_service.chunks else 0,
+        total_chunks=rag_service.total_vectors,
         law_types=LAW_TYPES,
     )
 

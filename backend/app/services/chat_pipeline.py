@@ -114,6 +114,7 @@ async def stream_chat_pipeline(message, history=None, law_types=None, top_k=5, r
         query = plan.query
         law_query = retrieval_identity(message, history, plan.uses_history, query)
         retrieval_started = time.perf_counter()
+        retrieval_timings = {}
         results = await asyncio.to_thread(
             rag_service.search,
             query,
@@ -121,6 +122,7 @@ async def stream_chat_pipeline(message, history=None, law_types=None, top_k=5, r
             law_types=law_types,
             strict=True,
             law_query=law_query,
+            timings=retrieval_timings,
         )
         retrieval_seconds = time.perf_counter() - retrieval_started
         sources = rag_service.get_sources(results)
@@ -128,8 +130,11 @@ async def stream_chat_pipeline(message, history=None, law_types=None, top_k=5, r
 
         yield {"type": "thinking", "stage": "Drafting legal analysis..."}
         generation_started = time.perf_counter()
+        first_token_seconds = None
         chunks: list[str] = []
         async for token_chunk in stream_response(history, message, context, not history):
+            if first_token_seconds is None and token_chunk.strip():
+                first_token_seconds = time.perf_counter() - generation_started
             chunks.append(token_chunk)
             yield {"type": "token", "text": token_chunk}
 
@@ -161,8 +166,10 @@ async def stream_chat_pipeline(message, history=None, law_types=None, top_k=5, r
             "retrieval_identity": law_query,
             "usage": records,
             "timings": {
+                **retrieval_timings,
                 "plan_seconds": plan_seconds,
                 "retrieval_seconds": retrieval_seconds,
+                "generation_first_token_seconds": first_token_seconds,
                 "generation_seconds": time.perf_counter() - generation_started,
                 "total_seconds": time.perf_counter() - started,
             },

@@ -34,8 +34,12 @@ async function fetchWithTimeout(
   retries: number = 1,
   retryDelayMs: number = 2000
 ): Promise<Response> {
+  const signal = options.signal;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) throw new Error("Request canceled.");
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, {
@@ -48,35 +52,44 @@ async function fetchWithTimeout(
       }
       return response;
     } catch (err) {
-      if (attempt < retries) {
+      if (!signal?.aborted && attempt < retries) {
         await new Promise((r) => setTimeout(r, retryDelayMs));
         continue;
       }
       throw err;
     } finally {
+      signal?.removeEventListener("abort", abort);
       clearTimeout(timeoutId);
     }
   }
   throw new Error("Request timed out.");
 }
 
-/**
- * Silent non-blocking health check ping to wake up cold-start Render servers on app launch.
- */
-export async function warmUpBackend(): Promise<void> {
-  try {
-    await fetchWithTimeout(
-      `${API_BASE_URL}/api/health`,
-      {
-        method: "GET",
-        headers: { "Bypass-Tunnel-Reminder": "true" },
-      },
-      12000,
-      0
-    );
-  } catch {
-    // Silent warm-up; ignore failures
+let backendWarmUp: Promise<void> | undefined;
+let lastHealthyProbe: number | undefined;
+const BACKEND_IDLE_MS = 15 * 60 * 1000;
+const BACKEND_WAKE_TIMEOUT_MS = 75 * 1000;
+
+/** Give the backend a head start when the composer is focused after a long pause. */
+export async function warmUpBackendIfIdle(): Promise<void> {
+  if (lastHealthyProbe === undefined || Date.now() - lastHealthyProbe >= BACKEND_IDLE_MS) {
+    await warmUpBackend();
   }
+}
+
+/** Share any pending startup health request across app lifecycle events. */
+export function warmUpBackend(): Promise<void> {
+  backendWarmUp ??= fetchWithTimeout(
+    `${API_BASE_URL}/api/health`,
+    { method: "GET", headers: { "Bypass-Tunnel-Reminder": "true" } },
+    BACKEND_WAKE_TIMEOUT_MS,
+    0
+  ).then(response => {
+    if (response.ok) lastHealthyProbe = Date.now();
+  }, () => {}).finally(() => {
+    backendWarmUp = undefined;
+  });
+  return backendWarmUp;
 }
 
 // ─── Types ──────────────────────────────────────────────────
@@ -127,7 +140,7 @@ export interface RAGStatus {
 
 // ─── Helper: Get Auth Headers ──────────────────────────────
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
+async function getApiSession() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -137,17 +150,24 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   }
 
   return {
-    "Content-Type": "application/json",
-    "Bypass-Tunnel-Reminder": "true",
-    Authorization: `Bearer ${session.access_token}`,
+    owner: session.user.id,
+    headers: {
+      "Content-Type": "application/json",
+      "Bypass-Tunnel-Reminder": "true",
+      Authorization: `Bearer ${session.access_token}`,
+    },
   };
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  return (await getApiSession()).headers;
 }
 
 // ─── Offline Cache Helpers ──────────────────────────────────
 
 export async function getCachedChats(): Promise<Chat[]> { return readCache<Chat>("chats"); }
 export async function cacheChats(chats: Chat[], owner?: string): Promise<void> { await writeCache("chats", chats.slice(0,50), owner); }
-export async function getCachedChatMessages(chatId: string): Promise<ChatMessage[]> { return readCache<ChatMessage>(`messages:${chatId}`); }
+export async function getCachedChatMessages(chatId: string, owner?: string): Promise<ChatMessage[]> { return readCache<ChatMessage>(`messages:${chatId}`, owner); }
 export async function cacheChatMessages(chatId: string, messages: ChatMessage[], owner?: string): Promise<void> { await writeCache(`messages:${chatId}`, messages.slice(-100), owner); }
 
 export interface StreamMessageCallbacks {
@@ -309,10 +329,8 @@ export async function streamMessage(
  * Get all chats for the current user, with automatic local cache persistence and offline fallback.
  */
 export async function getChats(options: { allowCacheFallback?: boolean } = {}): Promise<Chat[]> {
-  const owner = await cacheOwner();
+  const { owner, headers } = await getApiSession();
   try {
-    const headers = await getAuthHeaders();
-
     const response = await fetchWithTimeout(`${API_BASE_URL}/api/chats`, {
       method: "GET",
       headers,
@@ -331,7 +349,7 @@ export async function getChats(options: { allowCacheFallback?: boolean } = {}): 
   } catch (err) {
     if (owner !== await cacheOwner() || (err as any)?.status === 401 || (err as any)?.status === 403 || (err as any)?.status === 404) throw err;
     if (options.allowCacheFallback === false) throw err;
-    const cached = await getCachedChats();
+    const cached = await readCache<Chat>("chats", owner);
     if (cached.length > 0) {
       return cached;
     }
@@ -344,17 +362,17 @@ export async function getChats(options: { allowCacheFallback?: boolean } = {}): 
  */
 export async function getChatMessages(
   chatId: string,
-  options: { allowCacheFallback?: boolean } = {}
+  options: { allowCacheFallback?: boolean; signal?: AbortSignal } = {}
 ): Promise<ChatMessage[]> {
-  const owner = await cacheOwner();
+  const { owner, headers } = await getApiSession();
+  const { signal } = options;
   try {
-    const headers = await getAuthHeaders();
-
     const response = await fetchWithTimeout(
       `${API_BASE_URL}/api/chats/${chatId}/messages`,
       {
         method: "GET",
         headers,
+        signal,
       },
       10000
     );
@@ -367,12 +385,13 @@ export async function getChatMessages(
     const data = await response.json();
     const messages: ChatMessage[] = data.messages || [];
     if (owner !== await cacheOwner()) throw new Error("Account changed.");
+    if (signal?.aborted) throw new Error("Request canceled.");
     await cacheChatMessages(chatId, messages, owner);
     return messages;
   } catch (err) {
+    if (signal?.aborted || options.allowCacheFallback === false) throw err;
     if (owner !== await cacheOwner() || (err as any)?.status === 401 || (err as any)?.status === 403 || (err as any)?.status === 404) throw err;
-    if (options.allowCacheFallback === false) throw err;
-    const cached = await getCachedChatMessages(chatId);
+    const cached = await readCache<ChatMessage>(`messages:${chatId}`, owner);
     if (cached.length > 0) {
       return cached;
     }

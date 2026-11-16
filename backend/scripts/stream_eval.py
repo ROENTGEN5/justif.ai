@@ -3,18 +3,23 @@ import asyncio
 import json
 import os
 import time
+from uuid import uuid4
 
 
 class StreamFailure(RuntimeError):
-    def __init__(self, message, partial_answer="", first_answer_seconds=None):
+    def __init__(self, message, partial_answer="", first_answer_seconds=None, *, timings=None):
         super().__init__(message)
         self.partial_answer = partial_answer
         self.first_answer_seconds = first_answer_seconds
+        self.timings = timings or {}
 
 
 class StreamCollector:
-    def __init__(self):
+    def __init__(self, request_id=None):
         self.started = time.perf_counter()
+        self.request_id = request_id
+        self.headers_seconds = None
+        self.first_status_seconds = None
         self.first = None
         self.parts = []
         self.done = None
@@ -41,7 +46,7 @@ class StreamCollector:
                 if not isinstance(value, str):
                     raise self.failure("Invalid token")
                 if value:
-                    if self.first is None:
+                    if self.first is None and value.strip():
                         self.first = time.perf_counter() - self.started
                     self.parts.append(value)
             elif kind == "done":
@@ -51,18 +56,29 @@ class StreamCollector:
                 if self.parts and "".join(self.parts) != answer:
                     raise self.failure("Streamed and saved answers differ")
                 self.done = event
-            elif kind != "thinking":
+            elif kind == "thinking":
+                if self.first_status_seconds is None:
+                    self.first_status_seconds = time.perf_counter() - self.started
+            else:
                 raise self.failure("Unknown stream event")
 
+    def timings(self):
+        return {
+            "request_id": self.request_id,
+            "headers_seconds": self.headers_seconds,
+            "first_status_seconds": self.first_status_seconds,
+        }
+
     def failure(self, message):
-        return StreamFailure(message, "".join(self.parts), self.first)
+        return StreamFailure(message, "".join(self.parts), self.first, timings=self.timings())
 
     def result(self):
         if self.done is None or self.data:
             raise self.failure("Incomplete stream")
         return dict(answer=self.done["response"], sources=self.done.get("sources", []),
                     chat_id=self.done["chat_id"], message_id=self.done.get("message_id"),
-                    first_answer_seconds=self.first, retrieved_chunks=None, exact_context=None)
+                    first_answer_seconds=self.first, retrieved_chunks=None, exact_context=None,
+                    **self.timings())
 
 
 async def stream_api(case, args):
@@ -76,10 +92,12 @@ async def stream_api(case, args):
         async with asyncio.timeout(args.timeout):
             async with httpx.AsyncClient(timeout=args.timeout) as client:
                 for question in [*case.get("prior_user_turns", []), case["question"]]:
-                    collector = StreamCollector()
+                    collector = StreamCollector(uuid4().hex)
                     async with client.stream("POST", args.api_url.rstrip("/") + "/api/chat/stream",
                             headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
-                            json={"message": question, "chat_id": chat_id, "law_types": case.get("law_types")}) as response:
+                            json={"message": question, "chat_id": chat_id, "law_types": case.get("law_types"),
+                                  "request_id": collector.request_id}) as response:
+                        collector.headers_seconds = time.perf_counter() - collector.started
                         response.raise_for_status()
                         if "text/event-stream" not in response.headers.get("content-type", ""):
                             raise collector.failure("Expected event-stream response")

@@ -8,6 +8,8 @@ const code = ts.transpileModule(fs.readFileSync('lib/api.ts', 'utf8'), {
 }).outputText;
 const requests = [];
 let nextFetchResponse = null;
+let cacheWrites = 0;
+let testNow = Date.now();
 class XHR {
   responseText = ''; status = 200;
   constructor() { requests.push(this); }
@@ -19,8 +21,9 @@ const exportsObject = {};
 vm.runInNewContext(code, {
   exports: exportsObject, process: { env: {} }, __DEV__: true,
   XMLHttpRequest: XHR, setTimeout, clearTimeout, AbortController,
-  fetch: async () => {
-    if (typeof nextFetchResponse === 'function') return nextFetchResponse();
+  Date: class extends Date { static now() { return testNow; } },
+  fetch: async (url, options) => {
+    if (typeof nextFetchResponse === 'function') return nextFetchResponse(url, options);
     return nextFetchResponse;
   },
   require(name) {
@@ -35,7 +38,7 @@ vm.runInNewContext(code, {
     };
     if (name === './conversationCache') return {
       cacheOwner: async () => 'user-a',
-      writeCache: async () => {},
+      writeCache: async () => { cacheWrites++; },
       clearConversationCaches: async () => {},
       readCache: async (scope) => scope === 'chats'
         ? [{ id: 'cached-chat', title: 'Cached Chat', created_at: '', updated_at: '' }]
@@ -103,5 +106,44 @@ async function start(callbacks, signal, requestId) {
   const offlineChats = await exportsObject.getChats();
   assert.equal(offlineChats[0].id, 'cached-chat');
 
-  console.log('PASS: buffering, final flush, partial preservation, no resubmission, incomplete stream, 404, timeout, abort, 401/403/404 non-fallback, offline cache fallback');
+  let finishWarmUp;
+  let warmUpCount = 0;
+  nextFetchResponse = () => {
+    warmUpCount++;
+    return new Promise(resolve => { finishWarmUp = resolve; });
+  };
+  const warmUp = exportsObject.warmUpBackend();
+  assert.equal(exportsObject.warmUpBackend(), warmUp, 'resume shares a pending warm-up');
+  assert.equal(warmUpCount, 1);
+  finishWarmUp({ ok: true, status: 200 });
+  await warmUp;
+  await exportsObject.warmUpBackendIfIdle();
+  assert.equal(warmUpCount, 1, 'composer focus skips a recently healthy backend');
+  const nextWarmUp = exportsObject.warmUpBackend();
+  assert.equal(warmUpCount, 2, 'a later resume can start its own warm-up');
+  finishWarmUp({ status: 200 });
+  await nextWarmUp;
+  testNow += 15 * 60 * 1000;
+  const idleWarmUp = exportsObject.warmUpBackendIfIdle();
+  assert.equal(warmUpCount, 3, 'composer focus after inactivity can wake the backend');
+  finishWarmUp({ ok: true, status: 200 });
+  await idleWarmUp;
+
+  const history = new AbortController();
+  let completeHistory;
+  let historySignal;
+  nextFetchResponse = (_url, options) => {
+    historySignal = options.signal;
+    return new Promise(resolve => { completeHistory = resolve; });
+  };
+  const pendingHistory = exportsObject.getChatMessages('chat-1', { signal: history.signal });
+  pendingHistory.catch(() => {});
+  await new Promise(resolve => setImmediate(resolve));
+  history.abort();
+  assert.equal(historySignal.aborted, true, 'history cancellation reaches fetch');
+  completeHistory({ ok: true, status: 200, json: async () => ({ messages: [] }) });
+  await assert.rejects(pendingHistory, /canceled/);
+  assert.equal(cacheWrites, 0, 'canceled history cannot write a stale snapshot');
+
+  console.log('PASS: streaming, replay, offline cache, warm-up deduplication, and history cancellation');
 })().catch(error => { console.error(error); process.exitCode = 1; });

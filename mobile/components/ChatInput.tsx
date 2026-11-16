@@ -27,7 +27,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Strings } from "../constants/Strings";
 import { useTheme } from "../lib/theme";
 import { textFix } from "../lib/textFix";
-import type { FileAttachment } from "../lib/api";
+import { warmUpBackendIfIdle, type FileAttachment } from "../lib/api";
 import { pickImageFromCamera, pickImageFromGallery } from "../lib/mediaPicker";
 
 interface ChatInputProps {
@@ -36,6 +36,7 @@ interface ChatInputProps {
   onFocus?: () => void;
   isLoading?: boolean;
   disabled?: boolean;
+  sendDisabled?: boolean;
   /** Optional text prefilled when user selects "Ask Follow-up" from a message bubble */
   prefillText?: string;
   onClearPrefill?: () => void;
@@ -55,6 +56,7 @@ export default function ChatInput({
   onFocus,
   isLoading = false,
   disabled = false,
+  sendDisabled = false,
   prefillText,
   onClearPrefill,
 }: ChatInputProps) {
@@ -90,6 +92,7 @@ export default function ChatInput({
   }, []);
 
   const handleSend = () => {
+    if (isLoading || disabled || sendDisabled) return;
     const trimmed = message.trim();
 
     // If there's an attachment, send it along with optional user prompt
@@ -101,7 +104,7 @@ export default function ChatInput({
       return;
     }
 
-    if (!trimmed || isLoading || disabled) return;
+    if (!trimmed) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     onSend(trimmed);
@@ -109,7 +112,7 @@ export default function ChatInput({
   };
 
   const canSend =
-    (message.trim().length > 0 || attachment !== null) && !isLoading && !disabled;
+    (message.trim().length > 0 || attachment !== null) && !isLoading && !disabled && !sendDisabled;
 
   // ─── File Picking Logic ─────────────────────────────────
 
@@ -421,7 +424,10 @@ export default function ChatInput({
             ref={inputRef}
             value={message}
             onChangeText={setMessage}
-            onFocus={onFocus}
+            onFocus={() => {
+              void warmUpBackendIfIdle();
+              onFocus?.();
+            }}
             accessibilityLabel="Legal question input"
             accessibilityHint="Type your Philippine legal question here"
             placeholder={
